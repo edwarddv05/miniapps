@@ -293,6 +293,8 @@ function DataStateNative({ loading, error, tokens, onRetry }: { loading: boolean
 function HomeNative({ entries, tokens, loading, error, onOpenSchedule, onRetry }: { entries: ScheduleEntry[]; tokens: ThemeTokens; loading: boolean; error: string | null; onOpenSchedule: () => void; onRetry: () => void }) {
   const now = useCurrentTime();
   const { today, remaining, next, ongoing } = todayAgenda(entries, now);
+  const emptyTitle = !entries.length ? 'Aún no hay clases' : today.length ? 'Clases terminadas' : 'Día libre';
+  const emptyBody = !entries.length ? 'Añade una clase para verla aquí.' : today.length ? 'No quedan clases pendientes hoy.' : 'No hay clases programadas hoy.';
 
   return (
     <PageNative title="Hoy" tokens={tokens}>
@@ -305,7 +307,15 @@ function HomeNative({ entries, tokens, loading, error, onOpenSchedule, onRetry }
                 <NativeText modifiers={[...textModifiers(tokens, { style: 'largeTitle', weight: 'bold' }), monospacedDigit()]}>{next.start}</NativeText>
                 <NativeText modifiers={textModifiers(tokens, { style: 'title2', weight: 'semibold' })}>{next.title}</NativeText>
                 <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'body' })}>{[`${next.start} – ${next.end}`, next.location].filter(Boolean).join(' · ')}</NativeText>
-              </> : <NativeText modifiers={textModifiers(tokens, { style: 'title2', weight: 'semibold' })}>{!entries.length ? 'Aún no hay clases' : today.length ? 'Clases terminadas' : 'Día libre'}</NativeText>}
+              </> : <HStack alignment="center" spacing={12} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' }), padding({ vertical: 4 })]}>
+                <VStack alignment="center" spacing={0} modifiers={[frame({ width: 44, height: 44 }), background(tokens.slateSoft), clipShape('roundedRectangle', 12)]}>
+                  <SymbolImage name="calendar" color={tokens.slate} size={22} />
+                </VStack>
+                <VStack alignment="leading" spacing={4} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' })]}>
+                  <NativeText modifiers={textModifiers(tokens, { style: 'title2', weight: 'semibold' })}>{emptyTitle}</NativeText>
+                  <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'body' })}>{emptyBody}</NativeText>
+                </VStack>
+              </HStack>}
               <NativeButton label="Abrir horario" onPress={onOpenSchedule} modifiers={nativeGlassModifiers(tokens, true)} />
             </VStack>
           )}
@@ -533,8 +543,7 @@ function WeekOverviewNative({ entries, tokens, onSelectDay }: { entries: Schedul
   );
 }
 
-function ScheduleNative({ entries, tokens, selectedDay, onSelectDay, onCreate, onEdit, onLoadExample, onBack, loading, error, onRetry }: { entries: ScheduleEntry[]; tokens: ThemeTokens; selectedDay: DayIndex; onSelectDay: (day: DayIndex) => void; onCreate: () => void; onEdit: (entry: ScheduleEntry) => void; onLoadExample: () => void; onBack: () => void; loading: boolean; error: string | null; onRetry: () => void }) {
-  const [view, setView] = useState<ScheduleView>('day');
+function ScheduleNative({ entries, tokens, selectedDay, onSelectDay, onCreate, onEdit, onLoadExample, onBack, loading, error, onRetry, view, setView }: { entries: ScheduleEntry[]; tokens: ThemeTokens; selectedDay: DayIndex; onSelectDay: (day: DayIndex) => void; onCreate: () => void; onEdit: (entry: ScheduleEntry) => void; onLoadExample: () => void; onBack: () => void; loading: boolean; error: string | null; onRetry: () => void; view: ScheduleView; setView: (view: ScheduleView) => void }) {
   const dayEntries = sortedEntries(entries.filter((entry) => entry.day === selectedDay));
 
   return (
@@ -689,6 +698,7 @@ export default function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>('system');
   const [screen, setScreen] = useState<Screen>('home');
   const [destination, setDestination] = useState<MiniappDestination>('library');
+  const [scheduleView, setScheduleView] = useState<ScheduleView>('day');
   const [selectedDay, setSelectedDay] = useState<DayIndex>(currentDayIndex());
   const [entries, setEntries] = useState<ScheduleEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -818,7 +828,7 @@ export default function App() {
   };
 
   const schedule = (
-    <ScheduleNative entries={entries} tokens={tokens} selectedDay={selectedDay} onSelectDay={setSelectedDay} onCreate={() => openEditor()} onEdit={openEditor} onLoadExample={loadExample} onBack={() => setDestination('library')} loading={loading} error={storageError} onRetry={loadData} />
+    <ScheduleNative entries={entries} tokens={tokens} selectedDay={selectedDay} onSelectDay={setSelectedDay} onCreate={() => openEditor()} onEdit={openEditor} onLoadExample={loadExample} onBack={() => setDestination('library')} loading={loading} error={storageError} onRetry={loadData} view={scheduleView} setView={setScheduleView} />
   );
   const downloader = <DownloaderNative tokens={tokens} onBack={() => setDestination('library')} />;
   const body = (

@@ -331,6 +331,9 @@ function ScreenHeader({ title, tokens, right, onBack }: { title: string; tokens:
 function HomeScreen({ entries, tokens, loading, error, onRetry, onOpenSchedule }: { entries: ScheduleEntry[]; tokens: ThemeTokens; loading: boolean; error: string | null; onRetry: () => void; onOpenSchedule: () => void }) {
   const now = useCurrentTime();
   const { today, remaining, next, ongoing } = todayAgenda(entries, now);
+  const emptyTitle = !entries.length ? 'Aún no hay clases' : today.length ? 'Clases terminadas' : 'Día libre';
+  const emptyBody = !entries.length ? 'Añade una clase para verla aquí.' : today.length ? 'No quedan clases pendientes hoy.' : 'No hay clases programadas hoy.';
+  const emptyIcon: IconName = !entries.length ? 'calendar-outline' : today.length ? 'checkmark-circle-outline' : 'calendar-clear-outline';
 
   return (
     <ScrollView contentContainerStyle={[styles.scrollContent, styles.homeContent]} showsVerticalScrollIndicator={false}>
@@ -352,7 +355,13 @@ function HomeScreen({ entries, tokens, loading, error, onRetry, onOpenSchedule }
             <Text style={[styles.todayTime, { color: tokens.text }]}>{next.start}</Text>
             <Text style={[styles.todayTitle, { color: tokens.text }]}>{next.title}</Text>
             <Text style={[styles.todayMeta, { color: tokens.secondary }]}>{[`${next.start} – ${next.end}`, next.location].filter(Boolean).join(' · ')}</Text>
-          </> : <Text style={[styles.todayTitle, { color: tokens.text }]}>{!entries.length ? 'Aún no hay clases' : today.length ? 'Clases terminadas' : 'Día libre'}</Text>}
+          </> : <View style={[styles.emptyPreview, { backgroundColor: tokens.slateSoft }]}>
+            <Icon name={emptyIcon} color={tokens.slate} size={22} />
+            <View style={styles.emptyPreviewCopy}>
+              <Text style={[styles.emptyPreviewTitle, { color: tokens.text }]}>{emptyTitle}</Text>
+              <Text style={[styles.emptyPreviewBody, { color: tokens.secondary }]}>{emptyBody}</Text>
+            </View>
+          </View>}
           <GlassButton label="Abrir horario" onPress={onOpenSchedule} tokens={tokens} />
         </View>}
       </View>
@@ -1067,6 +1076,7 @@ const styles = StyleSheet.create({
   emptyPreview: { flexDirection: 'row', alignItems: 'center', borderRadius: 17, padding: 14, minHeight: 86 },
   emptyPreviewCopy: { flex: 1, marginLeft: 12 },
   emptyPreviewTitle: { fontSize: 16, lineHeight: 21, fontWeight: '700' },
+  emptyPreviewBody: { fontSize: 14, lineHeight: 19, marginTop: 4 },
   sectionLabel: { fontSize: 15, fontWeight: '600', marginBottom: 12, marginLeft: 16 },
   miniAppList: { borderRadius: 20, borderCurve: 'continuous', overflow: 'hidden' },
   miniAppRowPressable: { minHeight: 78 },
