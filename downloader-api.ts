@@ -4,10 +4,33 @@ import * as Sharing from 'expo-sharing';
 
 export type DownloadMode = 'video' | 'audio';
 
+export type DownloadQuality = {
+  id: string;
+  label: string;
+  height: number;
+};
+
+export type DownloadVideo = {
+  id: string;
+  title: string;
+  url: string;
+  durationSeconds?: number | null;
+};
+
+export type DownloadSource = {
+  key: 'youtube' | 'x' | 'facebook' | 'instagram' | 'tiktok' | 'other';
+  label: string;
+  shortLabel: string;
+};
+
 export type DownloadAnalysis = {
   title: string;
+  description?: string | null;
   uploader?: string | null;
   durationSeconds?: number | null;
+  videoCount: number;
+  videos: DownloadVideo[];
+  qualities: DownloadQuality[];
 };
 
 export type DownloadResult = {
@@ -26,6 +49,30 @@ export function downloaderErrorMessage(error: unknown, fallback: string) {
     return 'No se pudo conectar con el servicio local. Verifica que Downloader esté encendido.';
   }
   return error.message || fallback;
+}
+
+export function detectDownloadSource(input: string): DownloadSource | null {
+  try {
+    const hostname = new URL(input.trim()).hostname.toLowerCase().replace(/^www\./, '');
+    if (hostname === 'youtube.com' || hostname.endsWith('.youtube.com') || hostname === 'youtu.be') {
+      return { key: 'youtube', label: 'YouTube', shortLabel: 'YT' };
+    }
+    if (hostname === 'x.com' || hostname.endsWith('.x.com') || hostname === 'twitter.com' || hostname.endsWith('.twitter.com')) {
+      return { key: 'x', label: 'X', shortLabel: 'X' };
+    }
+    if (hostname === 'facebook.com' || hostname.endsWith('.facebook.com') || hostname === 'fb.watch') {
+      return { key: 'facebook', label: 'Facebook', shortLabel: 'f' };
+    }
+    if (hostname === 'instagram.com' || hostname.endsWith('.instagram.com')) {
+      return { key: 'instagram', label: 'Instagram', shortLabel: 'IG' };
+    }
+    if (hostname === 'tiktok.com' || hostname.endsWith('.tiktok.com')) {
+      return { key: 'tiktok', label: 'TikTok', shortLabel: 'TT' };
+    }
+    return { key: 'other', label: 'Web', shortLabel: 'WEB' };
+  } catch {
+    return null;
+  }
 }
 
 function assertUrl(value: string) {
@@ -56,20 +103,30 @@ export async function analyzeUrl(input: string): Promise<DownloadAnalysis> {
   });
 
   if (!response.ok) throw new Error(await readError(response, 'No se pudo analizar el enlace.'));
-  const result = await response.json() as DownloadAnalysis;
+  const result = await response.json() as Partial<DownloadAnalysis>;
+  const videos = Array.isArray(result.videos)
+    ? result.videos.filter((video): video is DownloadVideo => Boolean(video && typeof video.id === 'string' && typeof video.title === 'string' && typeof video.url === 'string'))
+    : [];
+  const qualities = Array.isArray(result.qualities)
+    ? result.qualities.filter((quality): quality is DownloadQuality => Boolean(quality && typeof quality.id === 'string' && typeof quality.label === 'string' && typeof quality.height === 'number'))
+    : [];
   return {
     title: result.title || 'Recurso sin título',
+    description: result.description || null,
     uploader: result.uploader || null,
     durationSeconds: typeof result.durationSeconds === 'number' ? result.durationSeconds : null,
+    videoCount: typeof result.videoCount === 'number' && result.videoCount > 0 ? result.videoCount : Math.max(videos.length, 1),
+    videos,
+    qualities,
   };
 }
 
-export async function downloadFromService(input: string, mode: DownloadMode): Promise<DownloadResult> {
+export async function downloadFromService(input: string, mode: DownloadMode, quality?: number | null): Promise<DownloadResult> {
   const url = assertUrl(input);
   const response = await fetch(`${DOWNLOADER_API_URL}/download`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url, mode }),
+    body: JSON.stringify({ url, mode, quality: quality ?? null }),
   });
 
   if (!response.ok) throw new Error(await readError(response, 'No se pudo completar la descarga.'));

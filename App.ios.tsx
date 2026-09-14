@@ -5,7 +5,6 @@ import {
   Button as NativeButton,
   ConfirmationDialog,
   ContextMenu,
-  ContentUnavailableView,
   DatePicker,
   Form,
   Group,
@@ -16,6 +15,7 @@ import {
   Picker,
   ProgressView,
   Section,
+  ScrollView,
   Spacer,
   TabView,
   Text as NativeText,
@@ -32,6 +32,7 @@ import {
   buttonBorderShape,
   buttonStyle,
   clipShape,
+  contentShape,
   controlSize,
   disabled,
   interactiveDismissDisabled,
@@ -48,6 +49,7 @@ import {
   presentationDetents,
   presentationDragIndicator,
   scrollContentBackground,
+  shapes,
   submitLabel,
   tag,
   textFieldStyle,
@@ -56,10 +58,10 @@ import {
 import type { SFSymbol } from 'sf-symbols-typescript';
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, Alert, Appearance, Platform, PlatformColor, useColorScheme, useWindowDimensions, type ColorValue } from 'react-native';
-import { parseSchedule, todayAgenda, type ScheduleEntry } from './schedule-data';
+import { formatScheduleTime, parseSchedule, todayAgenda, type ScheduleEntry } from './schedule-data';
 import { useCurrentTime } from './use-current-time';
 import { UI, type MiniappDestination } from './ui-structure';
-import { analyzeUrl, downloadFromService, downloaderErrorMessage, formatDuration, saveDownload, type DownloadAnalysis, type DownloadMode } from './downloader-api';
+import { analyzeUrl, detectDownloadSource, downloadFromService, downloaderErrorMessage, formatDuration, saveDownload, type DownloadAnalysis, type DownloadMode, type DownloadSource } from './downloader-api';
 import { StatusBar } from 'expo-status-bar';
 import { background, foregroundStyle, strokeBorder, tint } from './native-colors';
 
@@ -260,17 +262,35 @@ function NativeCircleButton({ tokens, accent = false, label, systemName, onPress
 }
 
 function PageNative({ title, tokens, onBack, action, children }: { title: string; tokens: ThemeTokens; onBack?: () => void; action?: ReactNode; children: ReactNode }) {
-  return <VStack spacing={0} modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity }), background(tokens.background)]}>
+  return <VStack spacing={0} modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity, alignment: 'topLeading' }), background(tokens.background)]}>
     <VStack alignment="leading" spacing={12} modifiers={[frame({ maxWidth: UI.contentWidth, alignment: 'leading' }), padding({ horizontal: UI.pageInset, top: 12, bottom: 8 })]}>
       {onBack ? <HStack alignment="center" spacing={12}>
         <NativeCircleButton tokens={tokens} label="Volver a Miniapps" systemName="chevron.left" onPress={onBack} />
         <Spacer />
-        {action}
+        <NativeText modifiers={[...textModifiers(tokens, { style: 'headline', weight: 'semibold' }), accessibilityAddTraits(['isHeader'])]}>{title}</NativeText>
+        <Spacer />
+        {action ?? <VStack modifiers={[frame({ width: CIRCLE_CONTROL_SIZE, height: CIRCLE_CONTROL_SIZE })]}>{null}</VStack>}
       </HStack> : null}
-      <NativeText modifiers={[...textModifiers(tokens, { style: 'largeTitle', weight: 'bold' }), accessibilityAddTraits(['isHeader'])]}>{title}</NativeText>
+      {!onBack && <NativeText modifiers={[...textModifiers(tokens, { style: 'largeTitle', weight: 'bold' }), accessibilityAddTraits(['isHeader'])]}>{title}</NativeText>}
     </VStack>
     {children}
   </VStack>;
+}
+
+function ReadingCanvasNative({ tokens, children }: { tokens: ThemeTokens; children: ReactNode }) {
+  return <ScrollView modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity })]}>
+    <VStack alignment="leading" spacing={28} modifiers={[frame({ maxWidth: UI.contentWidth, alignment: 'leading' }), padding({ horizontal: UI.pageInset, top: 20, bottom: 32 })]}>{children}</VStack>
+  </ScrollView>;
+}
+
+function WeekRhythmNative({ entries, tokens }: { entries: ScheduleEntry[]; tokens: ThemeTokens }) {
+  const today = currentDayIndex();
+  return <HStack alignment="top" spacing={4} modifiers={[frame({ maxWidth: Infinity })]}>
+    {DAYS.map(day => <VStack key={day.index} spacing={8} modifiers={[frame({ maxWidth: Infinity }), padding({ vertical: 12 }), background(day.index === today ? tokens.blueSoft : tokens.surface), clipShape('roundedRectangle', 12), accessibilityLabel(`${day.long}: ${entries.filter(entry => entry.day === day.index).length} clases${day.index === today ? ', hoy' : ''}`)]}>
+      <NativeText modifiers={textModifiers(tokens, { color: day.index === today ? tokens.blue : tokens.secondary, style: 'caption', weight: 'semibold' })}>{['L', 'M', 'X', 'J', 'V', 'S', 'D'][day.index]}</NativeText>
+      <NativeText modifiers={[...textModifiers(tokens, { color: day.index === today ? tokens.blue : tokens.text, style: 'headline', weight: 'semibold' }), monospacedDigit()]}>{String(entries.filter(entry => entry.day === day.index).length)}</NativeText>
+    </VStack>)}
+  </HStack>;
 }
 
 function groupedListModifiers(tokens: ThemeTokens): ViewModifier[] {
@@ -280,6 +300,12 @@ function groupedListModifiers(tokens: ThemeTokens): ViewModifier[] {
 function SymbolImage({ name, color, size = 22 }: { name: SFSymbol; color: ColorValue; size?: number }) {
   const textStyle = size >= 25 ? 'title' : size >= 22 ? 'title2' : size >= 18 ? 'body' : 'caption';
   return <NativeImage systemName={name} modifiers={[font({ textStyle }), foregroundStyle(color), accessibilityHidden()]} />;
+}
+
+function SourceBadgeNative({ source, tokens }: { source: DownloadSource; tokens: ThemeTokens }) {
+  return <VStack alignment="center" spacing={0} modifiers={[frame({ width: 34, height: 34 }), background(tokens.slateSoft), clipShape('roundedRectangle', 10), accessibilityLabel(`Fuente ${source.label}`)]}>
+    <NativeText modifiers={[...textModifiers(tokens, { color: tokens.slate, style: source.shortLabel.length > 2 ? 'caption2' : 'body', weight: 'bold' }), accessibilityHidden()]}>{source.shortLabel}</NativeText>
+  </VStack>;
 }
 
 function DataStateNative({ loading, error, tokens, onRetry }: { loading: boolean; error: string | null; tokens: ThemeTokens; onRetry: () => void }) {
@@ -298,15 +324,22 @@ function HomeNative({ entries, tokens, loading, error, onOpenSchedule, onRetry }
 
   return (
     <PageNative title="Hoy" tokens={tokens}>
-      <List modifiers={groupedListModifiers(tokens)}>
-        <Section header={<NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'subheadline' })}>{new Intl.DateTimeFormat('es-PE', { weekday: 'long', day: 'numeric', month: 'long' }).format(now)}</NativeText>}>
+      <ReadingCanvasNative tokens={tokens}>
+        <VStack alignment="leading" spacing={20} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' })]}>
+          <HStack alignment="center" spacing={16}>
+            <NativeText modifiers={[...textModifiers(tokens, { color: tokens.blue, style: 'largeTitle', weight: 'bold' }), monospacedDigit()]}>{String(now.getDate())}</NativeText>
+            <VStack alignment="leading" spacing={2}>
+              <NativeText modifiers={textModifiers(tokens, { style: 'headline', weight: 'semibold' })}>{new Intl.DateTimeFormat('es-PE', { weekday: 'long' }).format(now)}</NativeText>
+              <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'subheadline' })}>{new Intl.DateTimeFormat('es-PE', { month: 'long', year: 'numeric' }).format(now)}</NativeText>
+            </VStack>
+          </HStack>
           {loading || error ? <DataStateNative loading={loading} error={error} tokens={tokens} onRetry={onRetry} /> : (
-            <VStack alignment="leading" spacing={16} modifiers={[padding({ vertical: 16 }), frame({ maxWidth: Infinity, alignment: 'leading' })]}>
+            <VStack alignment="leading" spacing={20} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' }), padding({ all: 24 }), background(tokens.surface), clipShape('roundedRectangle', UI.groupRadius)]}>
               {next ? <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'subheadline', weight: 'semibold' })}>{ongoing ? 'En curso' : 'A continuación'}</NativeText> : null}
               {next ? <>
-                <NativeText modifiers={[...textModifiers(tokens, { style: 'largeTitle', weight: 'bold' }), monospacedDigit()]}>{next.start}</NativeText>
-                <NativeText modifiers={textModifiers(tokens, { style: 'title2', weight: 'semibold' })}>{next.title}</NativeText>
-                <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'body' })}>{[`${next.start} – ${next.end}`, next.location].filter(Boolean).join(' · ')}</NativeText>
+                <NativeText modifiers={textModifiers(tokens, { style: 'title', weight: 'bold' })}>{next.title}</NativeText>
+                <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'body' })}>{[`${formatScheduleTime(next.start)} a ${formatScheduleTime(next.end)}`, next.location].filter(Boolean).join(' · ')}</NativeText>
+                {ongoing ? <ProgressView value={Math.min(1, Math.max(0, (now.getHours() * 60 + now.getMinutes() - minutesFromTime(next.start)) / (minutesFromTime(next.end) - minutesFromTime(next.start))))} modifiers={[tint(tokens.blue), accessibilityLabel('Progreso de la clase')]} /> : null}
               </> : <HStack alignment="center" spacing={12} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' }), padding({ vertical: 4 })]}>
                 <VStack alignment="center" spacing={0} modifiers={[frame({ width: 44, height: 44 }), background(tokens.slateSoft), clipShape('roundedRectangle', 12)]}>
                   <SymbolImage name="calendar" color={tokens.slate} size={22} />
@@ -319,11 +352,17 @@ function HomeNative({ entries, tokens, loading, error, onOpenSchedule, onRetry }
               <NativeButton label="Abrir horario" onPress={onOpenSchedule} modifiers={nativeGlassModifiers(tokens, true)} />
             </VStack>
           )}
-        </Section>
-        {!loading && !error && remaining.length > 1 ? <Section title="Después">
+        </VStack>
+        {!loading && !error && remaining.length > 1 ? <VStack alignment="leading" spacing={8} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' })]}>
+          <NativeText modifiers={textModifiers(tokens, { style: 'title2', weight: 'bold' })}>Después</NativeText>
           {remaining.slice(1).map((entry) => <AgendaContentNative key={entry.id} entry={entry} tokens={tokens} />)}
-        </Section> : null}
-      </List>
+        </VStack> : null}
+        {!loading && !error && entries.length > 0 ? <VStack alignment="leading" spacing={12} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' })]}>
+          <NativeText modifiers={textModifiers(tokens, { style: 'title2', weight: 'bold' })}>Tu semana</NativeText>
+          <WeekRhythmNative entries={entries} tokens={tokens} />
+          <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'footnote' })}>Clases por día</NativeText>
+        </VStack> : null}
+      </ReadingCanvasNative>
     </PageNative>
   );
 }
@@ -334,12 +373,18 @@ function DownloaderNative({ tokens, onBack }: { tokens: ThemeTokens; onBack: () 
   const [mode, setMode] = useState<DownloadMode>('video');
   const [phase, setPhase] = useState<'idle' | 'analyzing' | 'ready' | 'downloading'>('idle');
   const [analysis, setAnalysis] = useState<DownloadAnalysis | null>(null);
+  const [selectedVideoId, setSelectedVideoId] = useState('');
+  const [qualityHeight, setQualityHeight] = useState<number | null>(null);
   const [status, setStatus] = useState<{ kind: 'error' | 'success'; text: string } | null>(null);
+  const source = detectDownloadSource(url);
+  const selectedVideo = analysis?.videos.find((video) => video.id === selectedVideoId);
 
   const updateUrl = (value: string) => {
     setUrl(value);
     urlState.set(value);
     setAnalysis(null);
+    setSelectedVideoId('');
+    setQualityHeight(null);
     setPhase('idle');
     setStatus(null);
   };
@@ -349,7 +394,10 @@ function DownloaderNative({ tokens, onBack }: { tokens: ThemeTokens; onBack: () 
     setPhase('analyzing');
     setStatus(null);
     try {
-      setAnalysis(await analyzeUrl(url));
+      const result = await analyzeUrl(url);
+      setAnalysis(result);
+      setSelectedVideoId(result.videos[0]?.id ?? '');
+      setQualityHeight(result.qualities[0]?.height ?? null);
       setPhase('ready');
     } catch (error) {
       setAnalysis(null);
@@ -363,7 +411,7 @@ function DownloaderNative({ tokens, onBack }: { tokens: ThemeTokens; onBack: () 
     setPhase('downloading');
     setStatus(null);
     try {
-      const result = await downloadFromService(url, mode);
+      const result = await downloadFromService(selectedVideo?.url || url, mode, mode === 'video' ? qualityHeight : null);
       await saveDownload(result);
       setStatus({ kind: 'success', text: 'Listo.' });
       setPhase('ready');
@@ -375,38 +423,57 @@ function DownloaderNative({ tokens, onBack }: { tokens: ThemeTokens; onBack: () 
 
   const isBusy = phase === 'analyzing' || phase === 'downloading';
   const actionLabel = phase === 'analyzing' ? 'Analizando…' : phase === 'downloading' ? 'Descargando…' : phase === 'ready' ? 'Descargar' : 'Analizar';
-  const actionIcon: SFSymbol = phase === 'ready' ? 'arrow.down' : 'magnifyingglass';
+  const videoCountLabel = analysis ? `${analysis.videoCount} ${analysis.videoCount === 1 ? 'video disponible' : 'videos disponibles'}` : null;
 
   return (
     <PageNative title="Downloader" tokens={tokens} onBack={onBack}>
       <Form modifiers={groupedListModifiers(tokens)}>
         <Section title="Enlace">
-          <TextField text={urlState} onTextChange={updateUrl} placeholder="https://…" modifiers={[font({ textStyle: 'body' }), textFieldStyle('plain'), keyboardType('url'), textInputAutocapitalization('never'), autocorrectionDisabled(), disabled(isBusy), accessibilityLabel('Enlace del audio o video'), submitLabel('go'), onSubmit(() => { if (phase === 'idle') void analyze(); })]} />
+          <HStack alignment="center" spacing={8} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' })]}>
+            {source ? <SourceBadgeNative source={source} tokens={tokens} /> : null}
+            <TextField text={urlState} onTextChange={updateUrl} placeholder="https://…" modifiers={[frame({ maxWidth: Infinity }), font({ textStyle: 'body' }), textFieldStyle('plain'), keyboardType('url'), textInputAutocapitalization('never'), autocorrectionDisabled(), disabled(isBusy), accessibilityLabel('Enlace del audio o video'), submitLabel('go'), onSubmit(() => { if (phase === 'idle') void analyze(); })]} />
+            {!analysis ? <NativeCircleButton tokens={tokens} accent label="Analizar enlace" systemName="arrow.up" onPress={() => void analyze()} disabled={isBusy || !url.trim()} /> : null}
+          </HStack>
+          {isBusy ? <VStack alignment="center" spacing={6} modifiers={[frame({ maxWidth: Infinity, alignment: 'center' }), padding({ vertical: 8 })]}>
+            <ProgressView />
+            <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'subheadline' })}>{actionLabel}</NativeText>
+          </VStack> : null}
         </Section>
         {analysis ? <>
           <Section title="Contenido">
-              <VStack alignment="leading" spacing={8} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' }), padding({ vertical: 8 })]}>
-                <NativeText modifiers={textModifiers(tokens, { style: 'body', weight: 'bold' })}>{analysis.title}</NativeText>
-                <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'subheadline' })}>{[analysis.uploader, formatDuration(analysis.durationSeconds)].filter(Boolean).join(' · ')}</NativeText>
-              </VStack>
+            <VStack alignment="leading" spacing={8} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' }), padding({ vertical: 8 })]}>
+              <NativeText modifiers={textModifiers(tokens, { style: 'title2', weight: 'bold' })}>{analysis.title}</NativeText>
+              {analysis.uploader ? <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'subheadline' })}>Usuario: {analysis.uploader}</NativeText> : null}
+              {formatDuration(analysis.durationSeconds) ? <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'subheadline' })}>Duración: {formatDuration(analysis.durationSeconds)}</NativeText> : null}
+              {analysis.description ? <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'body' })}>{analysis.description}</NativeText> : null}
+            </VStack>
           </Section>
+          {analysis.videos.length > 1 ? <Section title="Videos">
+            {videoCountLabel ? <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'subheadline' })}>{videoCountLabel}</NativeText> : null}
+            {analysis.videos.length > 1 ? <Picker label="Video" selection={selectedVideoId} onSelectionChange={(value) => setSelectedVideoId(String(value))} modifiers={[pickerStyle('menu'), disabled(isBusy), accessibilityLabel('Video')]}>
+              {analysis.videos.map((video) => <NativeText key={video.id} modifiers={[tag(video.id)]}>{video.title}</NativeText>)}
+            </Picker> : null}
+          </Section> : null}
           <Section title="Formato">
-          <Picker selection={mode} onSelectionChange={(value) => { setMode(value as DownloadMode); setStatus(null); }} modifiers={[pickerStyle('segmented'), frame({ maxWidth: Infinity }), disabled(isBusy), accessibilityLabel('Formato')]}>
-            <NativeText modifiers={[tag('video')]}>Video</NativeText>
-            <NativeText modifiers={[tag('audio')]}>Audio</NativeText>
-          </Picker>
+            <Picker selection={mode} onSelectionChange={(value) => { setMode(value as DownloadMode); setStatus(null); }} modifiers={[pickerStyle('segmented'), frame({ maxWidth: Infinity }), disabled(isBusy), accessibilityLabel('Formato')]}>
+              <NativeText modifiers={[tag('video')]}>Video</NativeText>
+              <NativeText modifiers={[tag('audio')]}>Audio</NativeText>
+            </Picker>
+          </Section>
+          {mode === 'video' && analysis.qualities.length > 0 ? <Section title="Calidad">
+            <Picker label="Calidad" selection={qualityHeight ?? analysis.qualities[0].height} onSelectionChange={(value) => setQualityHeight(Number(value))} modifiers={[pickerStyle('menu'), disabled(isBusy), accessibilityLabel('Calidad')]}>
+              {analysis.qualities.map((quality) => <NativeText key={quality.id} modifiers={[tag(quality.height)]}>{quality.label}</NativeText>)}
+            </Picker>
+          </Section> : null}
+          <Section>
+            <HStack alignment="center" spacing={16} modifiers={[padding({ vertical: 8 })]}>
+              <VStack alignment="leading" spacing={4} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' })]}>
+                <NativeText modifiers={textModifiers(tokens, { style: 'headline', weight: 'semibold' })}>{mode === 'audio' ? 'Guardar audio' : 'Guardar video'}</NativeText>
+              </VStack>
+              <NativeCircleButton tokens={tokens} accent label="Descargar" systemName="arrow.down" onPress={() => void download()} disabled={isBusy} />
+            </HStack>
           </Section>
         </> : null}
-        <Section>
-          {isBusy ? <ProgressView><NativeText>{actionLabel}</NativeText></ProgressView> : null}
-          <NativeButton
-            label={actionLabel}
-            systemImage={actionIcon}
-            onPress={() => void (phase === 'ready' ? download() : analyze())}
-            modifiers={[...nativeGlassModifiers(tokens, true), accessibilityLabel(actionLabel), disabled(isBusy || !url.trim())]}
-          />
-        </Section>
-
         {status ? (
           <HStack alignment="top" spacing={7} modifiers={[padding({ horizontal: 4 })]}>
             <SymbolImage name={status.kind === 'error' ? 'exclamationmark.circle' : 'checkmark.circle'} color={status.kind === 'error' ? tokens.danger : tokens.blue} size={18} />
@@ -423,9 +490,10 @@ function MiniappsNative({ entries, tokens, loading, error, onOpenSchedule, onOpe
   const downloaderRow = <MiniappRowNative title="Downloader" detail="Audio y video" icon="arrow.down.circle" iconColor={tokens.blue} iconBackground={tokens.blueSoft} tokens={tokens} onPress={onOpenDownloader} label="Abrir Miniapp Downloader" />;
 
   return (
-    <PageNative title="Miniapps" tokens={tokens}>
-      <List modifiers={groupedListModifiers(tokens)}>
-        <Section title="Biblioteca">
+    <PageNative title="Biblioteca" tokens={tokens}>
+      <ReadingCanvasNative tokens={tokens}>
+        <VStack alignment="leading" spacing={12} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' })]}>
+          <VStack alignment="leading" spacing={16} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' }), padding({ all: 20 }), background(tokens.surface), clipShape('roundedRectangle', UI.groupRadius)]}>
           {!loading && !error && entries.length > 0 ? (
             <ContextMenu>
               <ContextMenu.Trigger>{scheduleRow}</ContextMenu.Trigger>
@@ -434,24 +502,29 @@ function MiniappsNative({ entries, tokens, loading, error, onOpenSchedule, onOpe
               </ContextMenu.Items>
             </ContextMenu>
           ) : scheduleRow}
-          {downloaderRow}
-        </Section>
-      </List>
+            {!loading && !error && entries.length > 0 ? <WeekRhythmNative entries={entries} tokens={tokens} /> : null}
+          </VStack>
+        </VStack>
+        <VStack alignment="leading" spacing={12} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' })]}>
+          <VStack alignment="leading" spacing={0} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' }), padding({ all: 20 }), background(tokens.surface), clipShape('roundedRectangle', UI.groupRadius)]}>{downloaderRow}</VStack>
+        </VStack>
+      </ReadingCanvasNative>
     </PageNative>
   );
 }
 
 function MiniappRowNative({ title, detail, icon, iconColor, iconBackground, tokens, onPress, label }: { title: string; detail: string; icon: SFSymbol; iconColor: string; iconBackground: string; tokens: ThemeTokens; onPress: () => void; label: string }) {
   return (
-    <NativeButton onPress={onPress} modifiers={[buttonStyle('plain'), frame({ maxWidth: Infinity, alignment: 'leading' }), accessibilityLabel(label)]}>
-      <HStack alignment="center" spacing={16} modifiers={[frame({ maxWidth: Infinity, minHeight: 64, alignment: 'leading' }), padding({ vertical: 8 })]}>
+    <NativeButton onPress={onPress} modifiers={[buttonStyle('plain'), frame({ maxWidth: Infinity, minHeight: 84, alignment: 'leading' }), accessibilityLabel(label)]}>
+      <HStack alignment="center" spacing={16} modifiers={[frame({ maxWidth: Infinity, minHeight: 84, alignment: 'leading' }), padding({ vertical: 8 }), contentShape(shapes.rectangle())]}>
         <VStack alignment="center" spacing={0} modifiers={[frame({ width: 44, height: 44 }), background(iconBackground), clipShape('roundedRectangle', 12)]}>
           <SymbolImage name={icon} color={iconColor} size={22} />
         </VStack>
-        <VStack alignment="leading" spacing={3} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' })]}>
-          <NativeText modifiers={textModifiers(tokens, { style: 'body', weight: 'bold' })}>{title}</NativeText>
+        <VStack alignment="leading" spacing={3}>
+          <NativeText modifiers={textModifiers(tokens, { style: 'title2', weight: 'bold' })}>{title}</NativeText>
           <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'footnote' })}>{detail}</NativeText>
         </VStack>
+        <Spacer />
         <SymbolImage name="chevron.right" color={tokens.secondary} size={17} />
       </HStack>
     </NativeButton>
@@ -482,7 +555,7 @@ function SettingsNative({ themeMode, tokens, onThemeChange }: { themeMode: Theme
       <Form modifiers={groupedListModifiers(tokens)}>
         <Section title="Tema">
           <Picker selection={themeMode} onSelectionChange={(value) => onThemeChange(value as ThemeMode)} modifiers={[pickerStyle('inline'), accessibilityLabel('Tema')]}>
-            {(Object.keys(labels) as ThemeMode[]).map((mode) => <NativeText key={mode} modifiers={[tag(mode)]}>{labels[mode]}</NativeText>)}
+            {(Object.keys(labels) as ThemeMode[]).map((mode) => <HStack key={mode} spacing={12} modifiers={[tag(mode), padding({ vertical: 8 })]}><SymbolImage name={mode === 'system' ? 'iphone' : mode === 'light' ? 'sun.max' : 'moon'} color={tokens.secondary} /><NativeText modifiers={textModifiers(tokens)}>{labels[mode]}</NativeText></HStack>)}
           </Picker>
         </Section>
       </Form>
@@ -492,7 +565,7 @@ function SettingsNative({ themeMode, tokens, onThemeChange }: { themeMode: Theme
 
 function ScheduleEntryRowNative({ entry, tokens, onPress }: { entry: ScheduleEntry; tokens: ThemeTokens; onPress: () => void }) {
   return (
-    <NativeButton onPress={onPress} modifiers={[buttonStyle('plain'), frame({ maxWidth: Infinity, alignment: 'leading' }), accessibilityLabel(`Editar ${entry.title}, de ${entry.start} a ${entry.end}${entry.location ? `, ${entry.location}` : ''}`)]}>
+    <NativeButton onPress={onPress} modifiers={[buttonStyle('plain'), frame({ maxWidth: Infinity, alignment: 'leading' }), accessibilityLabel(`Editar ${entry.title}, de ${formatScheduleTime(entry.start)} a ${formatScheduleTime(entry.end)}${entry.location ? `, ${entry.location}` : ''}`)]}>
       <AgendaContentNative entry={entry} tokens={tokens} />
     </NativeButton>
   );
@@ -500,10 +573,10 @@ function ScheduleEntryRowNative({ entry, tokens, onPress }: { entry: ScheduleEnt
 
 function AgendaContentNative({ entry, tokens }: { entry: ScheduleEntry; tokens: ThemeTokens }) {
   const entryColor = colorForKey(entry.color, tokens);
-  return <AdaptiveRow modifiers={[frame({ maxWidth: Infinity, minHeight: 72, alignment: 'leading' }), padding({ vertical: 12 })]}>
+  return <AdaptiveRow modifiers={[frame({ maxWidth: Infinity, minHeight: 72, alignment: 'leading' }), padding({ vertical: 12 }), contentShape(shapes.rectangle())]}>
         <VStack alignment="leading" spacing={4}>
-          <NativeText modifiers={[...textModifiers(tokens, { style: 'headline', weight: 'semibold' }), monospacedDigit()]}>{entry.start}</NativeText>
-          <NativeText modifiers={[...textModifiers(tokens, { color: tokens.secondary, style: 'subheadline' }), monospacedDigit()]}>{entry.end}</NativeText>
+          <NativeText modifiers={[...textModifiers(tokens, { style: 'headline', weight: 'semibold' }), monospacedDigit()]}>{formatScheduleTime(entry.start)}</NativeText>
+          <NativeText modifiers={[...textModifiers(tokens, { color: tokens.secondary, style: 'subheadline' }), monospacedDigit()]}>{formatScheduleTime(entry.end)}</NativeText>
         </VStack>
         <VStack alignment="leading" spacing={6} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' })]}>
           <HStack alignment="center" spacing={7}>
@@ -517,25 +590,23 @@ function AgendaContentNative({ entry, tokens }: { entry: ScheduleEntry; tokens: 
 
 function EmptyAgendaNative({ entries, tokens, onLoadExample }: { entries: ScheduleEntry[]; tokens: ThemeTokens; onLoadExample: () => void }) {
   return (
-    <VStack alignment="center" spacing={12} modifiers={[frame({ maxWidth: Infinity, alignment: 'center' }), padding({ vertical: 24 })]}>
-      <ContentUnavailableView title="Sin clases" systemImage="calendar" />
+    <VStack alignment="center" spacing={12} modifiers={[frame({ maxWidth: Infinity, alignment: 'center' }), padding({ vertical: 28, horizontal: 20 })]}>
+      <SymbolImage name="calendar" color={tokens.secondary} size={26} />
+      <NativeText modifiers={[...textModifiers(tokens, { style: 'title3', weight: 'semibold' }), accessibilityAddTraits(['isHeader'])]}>{entries.length === 0 ? 'Sin clases' : 'Día libre'}</NativeText>
       {entries.length === 0 ? <NativeButton label="Cargar un ejemplo" onPress={onLoadExample} modifiers={[buttonStyle('borderless'), tint(tokens.slate)]} /> : null}
     </VStack>
   );
 }
 
-function WeekOverviewNative({ entries, tokens, onSelectDay }: { entries: ScheduleEntry[]; tokens: ThemeTokens; onSelectDay: (day: DayIndex) => void }) {
+function WeekOverviewNative({ entries, tokens, onEdit }: { entries: ScheduleEntry[]; tokens: ThemeTokens; onEdit: (entry: ScheduleEntry) => void }) {
+  const visibleDays = DAYS.filter((day) => entries.some((entry) => entry.day === day.index));
   return (
     <Group>
-      {DAYS.map((day) => {
+      {visibleDays.map((day) => {
         const dayEntries = sortedEntries(entries.filter((entry) => entry.day === day.index));
         return (
-          <Section key={day.index} title={day.long}>
-            <NativeButton onPress={() => onSelectDay(day.index)} modifiers={[buttonStyle('plain'), accessibilityLabel(`Abrir ${day.long}, ${dayEntries.length} clases`)]}>
-              <VStack alignment="leading" spacing={0} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' })]}>
-                {dayEntries.length ? dayEntries.map((entry) => <AgendaContentNative key={entry.id} entry={entry} tokens={tokens} />) : <NativeText modifiers={[...textModifiers(tokens, { color: tokens.secondary, style: 'body' }), padding({ vertical: 12 }), frame({ minHeight: 44 })]}>Día libre</NativeText>}
-              </VStack>
-            </NativeButton>
+          <Section key={day.index} header={<HStack spacing={8}><NativeText modifiers={textModifiers(tokens, { color: day.index === currentDayIndex() ? tokens.blue : tokens.text, style: 'title3', weight: 'bold' })}>{day.long}</NativeText><Spacer /><NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'caption' })}>{`${dayEntries.length} ${dayEntries.length === 1 ? 'clase' : 'clases'}`}</NativeText></HStack>}>
+              {dayEntries.map((entry) => <ScheduleEntryRowNative key={entry.id} entry={entry} tokens={tokens} onPress={() => onEdit(entry)} />)}
           </Section>
         );
       })}
@@ -543,19 +614,24 @@ function WeekOverviewNative({ entries, tokens, onSelectDay }: { entries: Schedul
   );
 }
 
-function ScheduleNative({ entries, tokens, selectedDay, onSelectDay, onCreate, onEdit, onLoadExample, onBack, loading, error, onRetry, view, setView }: { entries: ScheduleEntry[]; tokens: ThemeTokens; selectedDay: DayIndex; onSelectDay: (day: DayIndex) => void; onCreate: () => void; onEdit: (entry: ScheduleEntry) => void; onLoadExample: () => void; onBack: () => void; loading: boolean; error: string | null; onRetry: () => void; view: ScheduleView; setView: (view: ScheduleView) => void }) {
+function ScheduleNative({ entries, tokens, selectedDay, onCreate, onEdit, onLoadExample, onBack, loading, error, onRetry, view, setView }: { entries: ScheduleEntry[]; tokens: ThemeTokens; selectedDay: DayIndex; onCreate: () => void; onEdit: (entry: ScheduleEntry) => void; onLoadExample: () => void; onBack: () => void; loading: boolean; error: string | null; onRetry: () => void; view: ScheduleView; setView: (view: ScheduleView) => void }) {
   const dayEntries = sortedEntries(entries.filter((entry) => entry.day === selectedDay));
+  const emptyView = !loading && !error && ((view === 'day' && dayEntries.length === 0) || (view === 'week' && entries.length === 0));
 
   return (
     <PageNative title="Horario" tokens={tokens} onBack={onBack} action={
           <NativeCircleButton tokens={tokens} accent label="Añadir clase" systemName="plus" onPress={onCreate} disabled={loading || Boolean(error)} />
     }>
+        <VStack alignment="leading" spacing={4} modifiers={[frame({ maxWidth: UI.contentWidth, alignment: 'leading' }), padding({ horizontal: UI.pageInset, top: 20, bottom: 12 })]}>
+          <NativeText modifiers={textModifiers(tokens, { style: 'largeTitle', weight: 'bold' })}>{view === 'week' ? 'Tu semana' : DAYS[selectedDay].long}</NativeText>
+          {view === 'day' ? <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'subheadline' })}>{new Intl.DateTimeFormat('es-PE', { day: 'numeric', month: 'long' }).format(new Date())}</NativeText> : null}
+        </VStack>
         <Picker selection={view} onSelectionChange={(value) => setView(value as ScheduleView)} modifiers={[pickerStyle('segmented'), frame({ maxWidth: 680 }), padding({ horizontal: 20, top: 8, bottom: 8 }), accessibilityLabel('Vista del horario')]}>
-          <NativeText modifiers={[tag('day')]}>{'Agenda'}</NativeText>
+          <NativeText modifiers={[tag('day')]}>{'Hoy'}</NativeText>
           <NativeText modifiers={[tag('week')]}>{'Semana'}</NativeText>
         </Picker>
       <List modifiers={groupedListModifiers(tokens)}>
-        {loading ? (
+        {emptyView ? <EmptyAgendaNative entries={entries} tokens={tokens} onLoadExample={onLoadExample} /> : loading ? (
           <VStack alignment="center" spacing={10} modifiers={surfaceModifiers(tokens)}>
             <ProgressView />
             <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'callout' })}>Cargando tu horario</NativeText>
@@ -568,18 +644,11 @@ function ScheduleNative({ entries, tokens, selectedDay, onSelectDay, onCreate, o
             <NativeButton label="Intentar de nuevo" onPress={onRetry} modifiers={[buttonStyle('borderless'), tint(tokens.slate)]} />
           </VStack>
         ) : view === 'day' ? (
-          <>
-            <Section>
-            <Picker label="Día" selection={selectedDay} onSelectionChange={(value) => onSelectDay(value as DayIndex)} modifiers={[pickerStyle('menu'), font({ textStyle: 'body' }), accessibilityLabel('Día del horario')]}>
-              {DAYS.map((item) => <NativeText key={item.index} modifiers={[tag(item.index)]}>{item.long}</NativeText>)}
-            </Picker>
-            </Section>
-            <Section title={dayEntries.length ? `${dayEntries.length} ${dayEntries.length === 1 ? 'clase' : 'clases'}` : undefined}>
-              {dayEntries.length ? dayEntries.map((entry) => <ScheduleEntryRowNative key={entry.id} entry={entry} tokens={tokens} onPress={() => onEdit(entry)} />) : <EmptyAgendaNative entries={entries} tokens={tokens} onLoadExample={onLoadExample} />}
-            </Section>
-          </>
+          <Section title={`${dayEntries.length} ${dayEntries.length === 1 ? 'clase' : 'clases'}`}>
+            {dayEntries.map((entry) => <ScheduleEntryRowNative key={entry.id} entry={entry} tokens={tokens} onPress={() => onEdit(entry)} />)}
+          </Section>
         ) : (
-          <WeekOverviewNative entries={entries} tokens={tokens} onSelectDay={(nextDay) => { onSelectDay(nextDay); setView('day'); }} />
+          <WeekOverviewNative entries={entries} tokens={tokens} onEdit={onEdit} />
         )}
       </List>
     </PageNative>
@@ -650,8 +719,8 @@ function ScheduleEditorNative({ entry, defaultDay, tokens, onSave, onDelete, onC
     <Form modifiers={[scrollContentBackground('hidden'), background(tokens.background), frame({ maxWidth: Infinity, maxHeight: Infinity }), listStyle('insetGrouped'), disabled(saving)]}>
       <Section title="Clase">
         <VStack alignment="leading" spacing={6}>
-          <NativeText modifiers={textModifiers(tokens, { style: 'body', weight: 'semibold' })}>Nombre</NativeText>
-          <TextField text={titleState} onTextChange={(value) => { setTitle(value); titleState.set(value); }} placeholder="Matemáticas" modifiers={[font({ textStyle: 'body' }), textFieldStyle('plain'), accessibilityLabel('Nombre de la clase'), submitLabel('next'), onSubmit(() => { void locationInput.current?.focus(); })]} />
+          <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'subheadline', weight: 'semibold' })}>Nombre</NativeText>
+          <TextField text={titleState} onTextChange={(value) => { setTitle(value); titleState.set(value); }} placeholder="Nombre de la clase" modifiers={[font({ textStyle: 'title2', weight: 'semibold' }), padding({ vertical: 8 }), textFieldStyle('plain'), accessibilityLabel('Nombre de la clase'), submitLabel('next'), onSubmit(() => { void locationInput.current?.focus(); })]} />
         </VStack>
       </Section>
       <Section title="Horario">
@@ -660,10 +729,11 @@ function ScheduleEditorNative({ entry, defaultDay, tokens, onSave, onDelete, onC
         </Picker>
         <DatePicker title="Empieza" selection={timeToDate(start)} displayedComponents={['hourAndMinute']} onDateChange={(date) => setStart(dateToTime(date))} modifiers={[font({ textStyle: 'body', weight: 'semibold' })]} />
         <DatePicker title="Termina" selection={timeToDate(end)} displayedComponents={['hourAndMinute']} onDateChange={(date) => setEnd(dateToTime(date))} modifiers={[font({ textStyle: 'body', weight: 'semibold' })]} />
+        {minutesFromTime(end) > minutesFromTime(start) ? <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'footnote' })}>{`Cada ${DAYS[day].long.toLowerCase()} · ${minutesFromTime(end) - minutesFromTime(start)} min`}</NativeText> : null}
       </Section>
       <Section title="Detalles">
         <VStack alignment="leading" spacing={6}>
-          <NativeText modifiers={textModifiers(tokens, { style: 'body', weight: 'semibold' })}>Lugar</NativeText>
+          <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'subheadline', weight: 'semibold' })}>Lugar</NativeText>
           <TextField ref={locationInput} text={locationState} onTextChange={(value) => { setLocation(value); locationState.set(value); }} placeholder="Opcional" modifiers={[font({ textStyle: 'body' }), textFieldStyle('plain'), accessibilityLabel('Lugar, opcional'), submitLabel('done'), onSubmit(() => { void locationInput.current?.blur(); })]} />
         </VStack>
         <Picker label="Color" selection={color} onSelectionChange={(value) => setColor(value as ScheduleColor)} modifiers={[pickerStyle('menu'), font({ textStyle: 'body', weight: 'semibold' })]}>
@@ -732,7 +802,7 @@ export default function App() {
     void loadData();
   }, [loadData]);
 
-  const openSchedule = (day = selectedDay) => {
+  const openSchedule = (day = currentDayIndex()) => {
     setSelectedDay(day);
     setScreen('miniapps');
     setDestination('schedule');
@@ -762,11 +832,11 @@ export default function App() {
 
   const saveEntry = async (nextEntry: ScheduleEntry) => {
     const conflict = entries.find((item) => item.id !== nextEntry.id && item.day === nextEntry.day && minutesFromTime(nextEntry.start) < minutesFromTime(item.end) && minutesFromTime(nextEntry.end) > minutesFromTime(item.start));
-    if (conflict) return `Se cruza con “${conflict.title}”, de ${conflict.start} a ${conflict.end}.`;
+    if (conflict) return `Se cruza con “${conflict.title}”, de ${formatScheduleTime(conflict.start)} a ${formatScheduleTime(conflict.end)}.`;
     const nextEntries = sortedEntries([...entries.filter((item) => item.id !== nextEntry.id), nextEntry]);
     try {
       await persistEntries(nextEntries);
-      setSelectedDay(nextEntry.day);
+      setSelectedDay(currentDayIndex());
       setEditorVisible(false);
       setEditorEntry(null);
       setStorageError(null);
@@ -814,7 +884,7 @@ export default function App() {
     void (async () => {
       try {
         await persistEntries(EXAMPLE_SCHEDULE);
-        setSelectedDay(EXAMPLE_SCHEDULE[0].day);
+        setSelectedDay(currentDayIndex());
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } catch {
         Alert.alert('No se pudo cargar el ejemplo', 'Intenta cargarlo de nuevo.');
@@ -828,7 +898,7 @@ export default function App() {
   };
 
   const schedule = (
-    <ScheduleNative entries={entries} tokens={tokens} selectedDay={selectedDay} onSelectDay={setSelectedDay} onCreate={() => openEditor()} onEdit={openEditor} onLoadExample={loadExample} onBack={() => setDestination('library')} loading={loading} error={storageError} onRetry={loadData} view={scheduleView} setView={setScheduleView} />
+    <ScheduleNative entries={entries} tokens={tokens} selectedDay={selectedDay} onCreate={() => openEditor()} onEdit={openEditor} onLoadExample={loadExample} onBack={() => setDestination('library')} loading={loading} error={storageError} onRetry={loadData} view={scheduleView} setView={setScheduleView} />
   );
   const downloader = <DownloaderNative tokens={tokens} onBack={() => setDestination('library')} />;
   const body = (
@@ -842,7 +912,7 @@ export default function App() {
   return (
     <>
     <StatusBar style={tokens.mode === 'dark' ? 'light' : 'dark'} />
-    <Host style={{ flex: 1, backgroundColor: tokens.background }} colorScheme={tokens.mode} seedColor={tokens.blue} useViewportSizeMeasurement>
+    <Host style={{ flex: 1, backgroundColor: tokens.background }} colorScheme={tokens.mode} seedColor={tokens.blue} useViewportSizeMeasurement ignoreSafeArea={destination === 'downloader' ? 'keyboard' : undefined}>
       <ZStack alignment="center" modifiers={[background(tokens.background), frame({ maxWidth: Infinity, maxHeight: Infinity })]}>
         {body}
         <BottomSheet
