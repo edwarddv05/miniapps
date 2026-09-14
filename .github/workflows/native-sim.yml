@@ -390,6 +390,19 @@ jobs:
           path: build/native-sim-app
           key: native-sim-app-${{ runner.os }}-${{ steps.fp.outputs.hash }}
 
+      - name: Refresh cached JavaScript bundle
+        if: inputs.mode == 'build' && steps.appcache.outputs.cache-hit == 'true'
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          APP=$(find build/native-sim-app -maxdepth 1 -name '*.app' | head -1)
+          [ -n "$APP" ] || { echo "No .app to refresh"; exit 1; }
+          npx expo export:embed \
+            --platform ios \
+            --dev false \
+            --bundle-output "$APP/main.jsbundle" \
+            --assets-dest "$APP"
+
       - name: Export app archive
         if: inputs.mode == 'build' && inputs.export_app == 'true'
         run: |
@@ -420,17 +433,6 @@ jobs:
           set -euo pipefail
           APP=$(find build/native-sim-app -maxdepth 1 -name '*.app' | head -1)
           [ -n "$APP" ] || { echo "No .app to install"; exit 1; }
-
-          if [ "$CACHE_HIT" = "true" ]; then
-            # The fingerprint ignores app JS, so a reused binary carries a stale
-            # bundle. Re-embed current JS rather than rebuilding natively.
-            echo "Reused cached native build; refreshing the JS bundle"
-            npx expo export:embed \
-              --platform ios \
-              --dev false \
-              --bundle-output "$APP/main.jsbundle" \
-              --assets-dest "$APP"
-          fi
 
           BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Info.plist")
           xcrun simctl install "$UDID" "$APP"

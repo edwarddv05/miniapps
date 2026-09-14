@@ -320,7 +320,6 @@ function HomeNative({ entries, tokens, loading, error, onOpenSchedule, onRetry }
   const now = useCurrentTime();
   const { today, remaining, next, ongoing } = todayAgenda(entries, now);
   const emptyTitle = !entries.length ? 'Aún no hay clases' : today.length ? 'Clases terminadas' : 'Día libre';
-  const emptyBody = !entries.length ? 'Añade una clase para verla aquí.' : today.length ? 'No quedan clases pendientes hoy.' : 'No hay clases programadas hoy.';
 
   return (
     <PageNative title="Hoy" tokens={tokens}>
@@ -346,7 +345,6 @@ function HomeNative({ entries, tokens, loading, error, onOpenSchedule, onRetry }
                 </VStack>
                 <VStack alignment="leading" spacing={4} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' })]}>
                   <NativeText modifiers={textModifiers(tokens, { style: 'title2', weight: 'semibold' })}>{emptyTitle}</NativeText>
-                  <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'body' })}>{emptyBody}</NativeText>
                 </VStack>
               </HStack>}
               <NativeButton label="Abrir horario" onPress={onOpenSchedule} modifiers={nativeGlassModifiers(tokens, true)} />
