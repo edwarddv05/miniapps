@@ -7,12 +7,19 @@ const source = fs.readFileSync(path.join(__dirname, '../schedule-data.ts'), 'utf
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
 const moduleExports = {};
 new Function('exports', compiled)(moduleExports);
-const { parseSchedule, todayAgenda } = moduleExports;
+const { formatScheduleTime, parseSchedule, todayAgenda } = moduleExports;
 const entry = { id: 'test', title: 'Clase de prueba', day: 0, start: '08:00', end: '09:00', location: '', color: 'slate' };
 
 test('missing and empty storage are valid empty schedules', () => {
   assert.deepEqual(parseSchedule(null), []);
   assert.deepEqual(parseSchedule('[]'), []);
+});
+
+test('schedule times use a readable AM and PM format', () => {
+  assert.equal(formatScheduleTime('00:05'), '12:05 AM');
+  assert.equal(formatScheduleTime('11:00'), '11:00 AM');
+  assert.equal(formatScheduleTime('12:00'), '12:00 PM');
+  assert.equal(formatScheduleTime('14:30'), '2:30 PM');
 });
 
 test('existing valid records are preserved', () => {

@@ -1,5 +1,17 @@
 # My SuperApp design direction
 
+## Native redesign — September 2026
+
+The iOS app is the design authority. Expo Go is for the owner's physical iPhone. Keep that development server available. After implementing changes, build a standalone simulator .app with `native-sim --mode build`, review every screen and flow, fix defects, and rebuild until verified. A device .ipa cannot run in an iOS Simulator. Browser previews and Expo Go in the simulator do not approve the final native layout. Preserve Expo Go compatibility for the physical phone.
+
+This redesign replaces the former uniform grouped-list composition. Home is a scrolling day overview: calendar date, next class with its title first, actual in-class progress, remaining agenda, and a seven-day summary of stored classes. Library has separate full-width tool surfaces with a real weekly preview for Horario. The week summary is informational, with weekday and class count in its accessible label.
+
+Tool screens use a compact centered navigation row. Horario has its own day/week heading and native grouped sections with individual class rows. Downloader separates link entry, content/format selection, and a final download action. Settings contains only the theme options. The editor emphasizes the class name and shows recurrence and duration next to the time inputs.
+
+This is a personal app for its owner, who already knows its tools. Do not add instructional cards, appearance descriptions, promotional headings, or explanations of obvious controls. Keep field labels, real content, and actionable errors. Page headers must remain at the top in empty, loading, populated, and error states; the schedule's native List owns the remaining height in every state.
+
+These compositions supersede the older requirements below that prescribe a List for Home/Library, repeat a large tool title below back navigation, or put the download action in the URL field. Retain the functional constraints, data protection, semantic colors, native controls, and accessibility requirements below. The web fallback retains its existing working layout; native screenshots are the visual source of truth.
+
 ## Product
 
 My SuperApp is a quiet personal home for small, focused tools. The shipped tools are Horario, a weekly planner for seeing and editing recurring classes or commitments, and Downloader, a compact client for the local yt-dlp service.
@@ -33,7 +45,7 @@ Keep the tab bar available within Horario. Opening Horario from Inicio selects M
 
 Use short functional labels. Omit promotional subtitles, descriptions of obvious navigation, unavailable-tool placeholders, and nonfunctional settings. Familiar add/create actions show only `+`, and back actions show only `<`; keep their full names in accessibility labels. Keep one visible control per action within the same screen context; do not repeat an action in both the header and the empty state. Destructive schedule clearing is a contextual action on the Horario miniapp card, exposed by a long press and confirmed before execution. Ajustes contains only Tema. Empty states may offer a relevant action without explaining the whole app.
 
-Downloader uses a two-step flow: one URL field with a prominent `Analizar` action, followed by a compact result with the discovered title, source and duration, the native segmented choice between Video and Audio, and a prominent `Descargar` action. Visible copy stays functional and compact; the controls should carry the explanation. The iOS client does not embed Python or yt-dlp; it calls the local Windows service in `downloader-service/`, which analyzes the link before extraction and returns a file for the iOS share sheet. Keep service failures concise and actionable; do not present backend implementation details in the normal UI. Do not invent quality or destination controls until the service supports them.
+Downloader uses a two-step flow: one URL field with a prominent icon-only `Analizar` action, followed by a compact result with the discovered title, source, user, description and duration, the available video count, quality options returned by the service, the native segmented choice between Video and Audio, and a prominent icon-only `Descargar` action. Visible copy stays functional and compact; the controls should carry the explanation. The iOS client does not embed Python or yt-dlp; it calls the local Windows service in `downloader-service/`, which analyzes the link before extraction and returns a file for the iOS share sheet. Keep service failures concise and actionable; do not present backend implementation details in the normal UI.
 
 ## Typography
 
@@ -45,7 +57,7 @@ Meaningful SF Symbols also use Dynamic Type text styles. Schedule rows stack whe
 
 ## Composition
 
-Use a shared top title area, a compact day menu, and a single readable agenda column. Agenda and Semana are two views of the same recurring schedule. Semana groups every class by weekday; it must not hide all but the first class. Avoid dashboard grids. The schedule is the focal point. Supporting actions stay close to the schedule and use labels when an icon alone could be ambiguous. Peer controls in the same navigation row share a vertical centerline; do not split back and create controls across different rows.
+Use a shared top title area, a `Hoy` view that reads the current day directly, and a single readable agenda column. `Hoy` and `Semana` are two views of the same recurring schedule. Do not add a day selector to the `Hoy` view. Semana groups every class by weekday; it must not hide all but the first class. Avoid dashboard grids. The schedule is the focal point. Supporting actions stay close to the schedule and use labels when an icon alone could be ambiguous. Peer controls in the same navigation row share a vertical centerline; do not split back and create controls across different rows.
 
 Design Read: a quiet personal utility for students and people managing recurring commitments, in a native grouped-list language, with ENERGY 2 / RHYTHM 2 / MOTION 1. The focal point is the next useful action, not decorative surface area.
 

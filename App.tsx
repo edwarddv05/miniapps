@@ -4,10 +4,10 @@ import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from 'ex
 import * as Haptics from 'expo-haptics';
 import { StatusBar } from 'expo-status-bar';
 import { ComponentProps, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { parseSchedule, todayAgenda, type ScheduleEntry } from './schedule-data';
+import { formatScheduleTime, parseSchedule, todayAgenda, type ScheduleEntry } from './schedule-data';
 import { useCurrentTime } from './use-current-time';
 import { UI, type MiniappDestination } from './ui-structure';
-import { analyzeUrl, downloadFromService, downloaderErrorMessage, formatDuration, saveDownload, type DownloadAnalysis, type DownloadMode } from './downloader-api';
+import { analyzeUrl, detectDownloadSource, downloadFromService, downloaderErrorMessage, formatDuration, saveDownload, type DownloadAnalysis, type DownloadMode, type DownloadSource } from './downloader-api';
 import {
   Alert,
   AccessibilityInfo,
@@ -220,6 +220,7 @@ function GlassButton({
   onPress,
   tokens,
   compact = false,
+  inline = false,
   fullWidth = false,
   accessibilityHint,
   disabled = false,
@@ -229,6 +230,7 @@ function GlassButton({
   onPress: () => void;
   tokens: ThemeTokens;
   compact?: boolean;
+  inline?: boolean;
   fullWidth?: boolean;
   accessibilityHint?: string;
   disabled?: boolean;
@@ -242,9 +244,9 @@ function GlassButton({
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityHint={accessibilityHint}
-      style={({ pressed }) => [styles.glassButtonPressable, compact && styles.glassButtonCompact, fullWidth && styles.glassButtonFullWidthPressable, disabled && styles.disabledControl, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.glassButtonPressable, compact && styles.glassButtonCompact, inline && styles.glassButtonInlinePressable, fullWidth && styles.glassButtonFullWidthPressable, disabled && styles.disabledControl, pressed && styles.pressed]}
     >
-      <GlassSurface tokens={tokens} interactive={!disabled} tintColor={tokens.blue} style={[styles.glassButton, compact && styles.glassButtonCompactSurface, fullWidth && styles.glassButtonFullWidth]}>
+      <GlassSurface tokens={tokens} interactive={!disabled} tintColor={tokens.blue} style={[styles.glassButton, compact && styles.glassButtonCompactSurface, inline && styles.glassButtonInline, fullWidth && styles.glassButtonFullWidth]}>
         {icon ? <Icon name={icon} color={tokens.inverseText} size={compact ? 20 : 18} /> : null}
         <Text style={[styles.glassButtonText, { color: tokens.inverseText }]}>{label}</Text>
       </GlassSurface>
@@ -252,7 +254,13 @@ function GlassButton({
   );
 }
 
-function IconButton({ label, icon, onPress, tokens, tintColor = tokens.blue, iconColor = tokens.inverseText, disabled = false }: { label: string; icon: IconName; onPress: () => void; tokens: ThemeTokens; tintColor?: string; iconColor?: string; disabled?: boolean }) {
+function SourceBadge({ source, tokens }: { source: DownloadSource; tokens: ThemeTokens }) {
+  return <View accessible accessibilityLabel={`Fuente ${source.label}`} style={[styles.downloaderSourceBadge, { backgroundColor: tokens.slateSoft }]}>
+    <Text style={[styles.downloaderSourceBadgeText, { color: tokens.slate }]}>{source.shortLabel}</Text>
+  </View>;
+}
+
+function IconButton({ label, icon, onPress, tokens, tintColor = tokens.blue, iconColor = tokens.inverseText, disabled = false, accessibilityHint }: { label: string; icon: IconName; onPress: () => void; tokens: ThemeTokens; tintColor?: string; iconColor?: string; disabled?: boolean; accessibilityHint?: string }) {
   return (
     <Pressable
       disabled={disabled}
@@ -260,6 +268,7 @@ function IconButton({ label, icon, onPress, tokens, tintColor = tokens.blue, ico
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityHint={accessibilityHint}
       style={({ pressed }) => [styles.iconButton, disabled && { opacity: 0.5 }, pressed && styles.pressed]}
     >
       <GlassSurface tokens={tokens} interactive={!disabled} tintColor={tintColor} style={styles.iconButtonSurface}>
@@ -352,9 +361,9 @@ function HomeScreen({ entries, tokens, loading, error, onRetry, onOpenSchedule }
         ) : <View style={styles.todayFocus}>
           {next ? <Text style={[styles.todayState, { color: tokens.secondary }]}>{ongoing ? 'En curso' : 'A continuación'}</Text> : null}
           {next ? <>
-            <Text style={[styles.todayTime, { color: tokens.text }]}>{next.start}</Text>
+            <Text style={[styles.todayTime, { color: tokens.text }]}>{formatScheduleTime(next.start)}</Text>
             <Text style={[styles.todayTitle, { color: tokens.text }]}>{next.title}</Text>
-            <Text style={[styles.todayMeta, { color: tokens.secondary }]}>{[`${next.start} – ${next.end}`, next.location].filter(Boolean).join(' · ')}</Text>
+            <Text style={[styles.todayMeta, { color: tokens.secondary }]}>{[`${formatScheduleTime(next.start)} a ${formatScheduleTime(next.end)}`, next.location].filter(Boolean).join(' · ')}</Text>
           </> : <View style={[styles.emptyPreview, { backgroundColor: tokens.slateSoft }]}>
             <Icon name={emptyIcon} color={tokens.slate} size={22} />
             <View style={styles.emptyPreviewCopy}>
@@ -382,11 +391,17 @@ function DownloaderScreen({ tokens, onBack }: { tokens: ThemeTokens; onBack: () 
   const [mode, setMode] = useState<DownloadMode>('video');
   const [phase, setPhase] = useState<'idle' | 'analyzing' | 'ready' | 'downloading'>('idle');
   const [analysis, setAnalysis] = useState<DownloadAnalysis | null>(null);
+  const [selectedVideoId, setSelectedVideoId] = useState('');
+  const [qualityHeight, setQualityHeight] = useState<number | null>(null);
   const [status, setStatus] = useState<{ kind: 'error' | 'success'; text: string } | null>(null);
+  const source = detectDownloadSource(url);
+  const selectedVideo = analysis?.videos.find((video) => video.id === selectedVideoId);
 
   const updateUrl = (value: string) => {
     setUrl(value);
     setAnalysis(null);
+    setSelectedVideoId('');
+    setQualityHeight(null);
     setPhase('idle');
     setStatus(null);
   };
@@ -396,7 +411,10 @@ function DownloaderScreen({ tokens, onBack }: { tokens: ThemeTokens; onBack: () 
     setPhase('analyzing');
     setStatus(null);
     try {
-      setAnalysis(await analyzeUrl(url));
+      const result = await analyzeUrl(url);
+      setAnalysis(result);
+      setSelectedVideoId(result.videos[0]?.id ?? '');
+      setQualityHeight(result.qualities[0]?.height ?? null);
       setPhase('ready');
     } catch (error) {
       setAnalysis(null);
@@ -410,7 +428,7 @@ function DownloaderScreen({ tokens, onBack }: { tokens: ThemeTokens; onBack: () 
     setPhase('downloading');
     setStatus(null);
     try {
-      const result = await downloadFromService(url, mode);
+      const result = await downloadFromService(selectedVideo?.url || url, mode, mode === 'video' ? qualityHeight : null);
       await saveDownload(result);
       setStatus({ kind: 'success', text: 'Listo.' });
       setPhase('ready');
@@ -422,7 +440,8 @@ function DownloaderScreen({ tokens, onBack }: { tokens: ThemeTokens; onBack: () 
 
   const isBusy = phase === 'analyzing' || phase === 'downloading';
   const actionLabel = phase === 'analyzing' ? 'Analizando…' : phase === 'downloading' ? 'Descargando…' : phase === 'ready' ? 'Descargar' : 'Analizar';
-  const actionIcon = phase === 'ready' ? 'arrow-down-outline' : 'scan-outline';
+  const actionIcon = phase === 'ready' ? 'arrow-down-outline' : 'search-outline';
+  const videoCountLabel = analysis ? `${analysis.videoCount} ${analysis.videoCount === 1 ? 'video disponible' : 'videos disponibles'}` : null;
 
   return (
     <View style={[styles.screen, { backgroundColor: tokens.background }]}>
@@ -430,19 +449,36 @@ function DownloaderScreen({ tokens, onBack }: { tokens: ThemeTokens; onBack: () 
         <ScreenHeader title="Downloader" tokens={tokens} onBack={onBack} />
         <View style={[styles.downloaderSurface, { backgroundColor: tokens.surface, borderColor: tokens.border }]}>
           <Text style={[styles.fieldLabel, { color: tokens.text }]}>Enlace</Text>
-          <TextInput value={url} editable={!isBusy} onChangeText={updateUrl} onSubmitEditing={() => { if (phase === 'idle') void analyze(); }} placeholder="https://…" placeholderTextColor={tokens.muted} keyboardType="url" autoCapitalize="none" autoCorrect={false} returnKeyType="go" accessibilityLabel="URL" style={[styles.downloaderInput, { backgroundColor: tokens.background, borderColor: tokens.borderStrong, color: tokens.text }]} />
+          <View style={styles.downloaderLinkRow}>
+            {source ? <SourceBadge source={source} tokens={tokens} /> : null}
+            <TextInput value={url} editable={!isBusy} onChangeText={updateUrl} onSubmitEditing={() => { if (phase === 'idle') void analyze(); }} placeholder="https://…" placeholderTextColor={tokens.muted} keyboardType="url" autoCapitalize="none" autoCorrect={false} returnKeyType="go" accessibilityLabel="Enlace del audio o video" style={[styles.downloaderInputInline, { backgroundColor: tokens.background, borderColor: tokens.borderStrong, color: tokens.text }]} />
+            <IconButton label={phase === 'ready' ? 'Descargar' : 'Analizar enlace'} icon={actionIcon} onPress={() => void (phase === 'ready' ? download() : analyze())} tokens={tokens} disabled={isBusy || !url.trim()} accessibilityHint={phase === 'ready' ? 'Descarga el recurso con el formato elegido' : 'Busca la información del enlace'} />
+          </View>
+          {isBusy ? <View style={styles.downloaderLoading} accessibilityLiveRegion="polite"><ActivityIndicator color={tokens.blue} accessibilityLabel={actionLabel} /><Text style={[styles.downloaderLoadingText, { color: tokens.secondary }]}>{actionLabel}</Text></View> : null}
 
           {analysis ? (
-            <View style={[styles.downloaderResult, { backgroundColor: tokens.blueSoft }]} accessibilityLiveRegion="polite">
-              <Icon name="checkmark-circle" color={tokens.blue} size={22} />
+            <View style={[styles.downloaderResult, { backgroundColor: tokens.surfaceRaised, borderColor: tokens.border }]} accessibilityLiveRegion="polite">
+              <View style={styles.downloaderResultHeader}>
+                {source ? <SourceBadge source={source} tokens={tokens} /> : <Icon name="checkmark-circle" color={tokens.blue} size={22} />}
+                <View style={styles.downloaderResultCopy}>
+                  <Text style={[styles.downloaderResultTitle, { color: tokens.text }]}>{analysis.title}</Text>
+                  {source ? <Text style={[styles.downloaderResultMeta, { color: tokens.secondary }]}>{source.label}</Text> : null}
+                </View>
+              </View>
               <View style={styles.downloaderResultCopy}>
-                <Text style={[styles.downloaderResultTitle, { color: tokens.text }]}>{analysis.title}</Text>
-                <Text style={[styles.downloaderResultMeta, { color: tokens.secondary }]}>{[analysis.uploader, formatDuration(analysis.durationSeconds)].filter(Boolean).join(' · ') || 'Listo'}</Text>
+                {analysis.uploader ? <Text style={[styles.downloaderResultMeta, { color: tokens.secondary }]}>Usuario: {analysis.uploader}</Text> : null}
+                {formatDuration(analysis.durationSeconds) ? <Text style={[styles.downloaderResultMeta, { color: tokens.secondary }]}>Duración: {formatDuration(analysis.durationSeconds)}</Text> : null}
+                {analysis.description ? <Text style={[styles.downloaderDescription, { color: tokens.secondary }]}>{analysis.description}</Text> : null}
               </View>
             </View>
           ) : null}
 
           {analysis ? <>
+          <Text style={[styles.fieldLabel, styles.downloaderFormatLabel, { color: tokens.text }]}>Videos</Text>
+          <Text style={[styles.downloaderResultMeta, { color: tokens.secondary }]}>{videoCountLabel}</Text>
+          {analysis.videos.length > 1 ? <select aria-label="Video" disabled={isBusy} value={selectedVideoId} onChange={(event) => setSelectedVideoId(event.target.value)} style={{ ...styles.downloaderSelect, backgroundColor: tokens.background, borderColor: tokens.borderStrong, color: tokens.text, colorScheme: tokens.mode }}>
+            {analysis.videos.map((video) => <option key={video.id} value={video.id}>{video.title}</option>)}
+          </select> : null}
           <Text style={[styles.fieldLabel, styles.downloaderFormatLabel, { color: tokens.text }]}>Formato</Text>
           <View style={[styles.downloaderModeRow, { backgroundColor: tokens.background, borderColor: tokens.borderStrong }]} accessibilityRole="tablist" accessibilityLabel="Formato">
             {([['video', 'Video'], ['audio', 'Audio']] as Array<[DownloadMode, string]>).map(([key, label]) => {
@@ -450,18 +486,13 @@ function DownloaderScreen({ tokens, onBack }: { tokens: ThemeTokens; onBack: () 
               return <Pressable key={key} disabled={isBusy} onPress={() => { setMode(key); setStatus(null); }} accessibilityRole="tab" accessibilityLabel={label} aria-selected={selected} style={({ pressed }) => [styles.downloaderMode, selected && { backgroundColor: tokens.surfaceRaised, borderColor: tokens.border }, pressed && styles.pressed]}><Icon name={key === 'video' ? 'videocam-outline' : 'musical-notes-outline'} color={selected ? tokens.text : tokens.secondary} size={18} /><Text style={[styles.downloaderModeText, { color: selected ? tokens.text : tokens.secondary }]}>{label}</Text></Pressable>;
             })}
           </View>
+          {mode === 'video' && analysis.qualities.length > 0 ? <>
+            <Text style={[styles.fieldLabel, styles.downloaderFormatLabel, { color: tokens.text }]}>Calidad</Text>
+            <select aria-label="Calidad" disabled={isBusy} value={qualityHeight ?? analysis.qualities[0].height} onChange={(event) => setQualityHeight(Number(event.target.value))} style={{ ...styles.downloaderSelect, backgroundColor: tokens.background, borderColor: tokens.borderStrong, color: tokens.text, colorScheme: tokens.mode }}>
+              {analysis.qualities.map((quality) => <option key={quality.id} value={quality.height}>{quality.label}</option>)}
+            </select>
           </> : null}
-          {isBusy ? <ActivityIndicator style={{ marginTop: 20 }} color={tokens.blue} accessibilityLabel={actionLabel} /> : null}
-          <View style={styles.downloaderActionRow}>
-          <GlassButton
-            label={actionLabel}
-            icon={actionIcon}
-            onPress={() => void (phase === 'ready' ? download() : analyze())}
-            tokens={tokens}
-            disabled={isBusy || !url.trim()}
-            accessibilityHint={phase === 'ready' ? 'Descarga el recurso con el formato elegido' : 'Busca la información del enlace'}
-          />
-          </View>
+          </> : null}
         </View>
         {status ? (
           <View style={styles.statusRow} accessibilityLiveRegion="polite">
@@ -566,7 +597,7 @@ function SegmentedControl({ value, onChange, tokens }: { value: ScheduleView; on
   return (
     <View style={[styles.segmented, { backgroundColor: tokens.controlTrack }]} accessibilityRole="tablist" accessibilityLabel="Vista del horario">
       {([
-        ['day', 'Agenda'],
+        ['day', 'Hoy'],
         ['week', 'Semana'],
       ] as Array<[ScheduleView, string]>).map(([key, label]) => {
         const selected = value === key;
@@ -602,7 +633,7 @@ function DayPicker({ selectedDay, onChange, tokens, disabled = false }: { select
 }
 
 function ScheduleEntryRow({ entry, tokens, onPress }: { entry: ScheduleEntry; tokens: ThemeTokens; onPress: () => void }) {
-  return <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={`Editar ${entry.title}, de ${entry.start} a ${entry.end}${entry.location ? `, ${entry.location}` : ''}`} style={({ pressed }) => pressed && styles.pressed}>
+  return <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={`Editar ${entry.title}, de ${formatScheduleTime(entry.start)} a ${formatScheduleTime(entry.end)}${entry.location ? `, ${entry.location}` : ''}`} style={({ pressed }) => pressed && styles.pressed}>
     <AgendaContent entry={entry} tokens={tokens} />
   </Pressable>;
 }
@@ -613,8 +644,8 @@ function AgendaContent({ entry, tokens }: { entry: ScheduleEntry; tokens: ThemeT
   return (
     <View style={[styles.scheduleRow, { borderColor: tokens.border }, (width < 350 || fontScale >= 1.3) && styles.agendaStacked]}>
       <View style={styles.timeColumn}>
-        <Text style={[styles.timeText, { color: tokens.text }]}>{entry.start}</Text>
-        <Text style={[styles.endTimeText, { color: tokens.muted }]}>{entry.end}</Text>
+        <Text style={[styles.timeText, { color: tokens.text }]}>{formatScheduleTime(entry.start)}</Text>
+        <Text style={[styles.endTimeText, { color: tokens.muted }]}>{formatScheduleTime(entry.end)}</Text>
       </View>
       <View style={styles.scheduleCard}>
         <View style={[styles.scheduleColorDot, { backgroundColor: entryColor.main }]} />
@@ -637,11 +668,11 @@ function DayAgenda({ selectedDay, entries, tokens, onEdit, onLoadExample }: { se
 
   if (dayEntries.length === 0) {
     return (
-      <View style={[styles.emptyState, { backgroundColor: tokens.surface, borderColor: tokens.border }]}>
+      <View style={styles.emptyState}>
         <View style={[styles.emptyStateIcon, { backgroundColor: tokens.slateSoft }]}>
           <Icon name="calendar-clear-outline" color={tokens.slate} size={28} />
         </View>
-        <Text style={[styles.emptyStateTitle, { color: tokens.text }]}>Sin clases</Text>
+        <Text style={[styles.emptyStateTitle, { color: tokens.text }]}>{entries.length === 0 ? 'Sin clases' : 'Día libre'}</Text>
         {entries.length === 0 ? (
           <Pressable onPress={onLoadExample} accessibilityRole="button" accessibilityLabel="Cargar un horario de ejemplo" style={({ pressed }) => [styles.textAction, pressed && styles.pressed]}>
             <Text style={[styles.textActionText, { color: tokens.slate }]}>Cargar un ejemplo</Text>
@@ -661,17 +692,29 @@ function DayAgenda({ selectedDay, entries, tokens, onEdit, onLoadExample }: { se
   );
 }
 
-function WeekOverview({ entries, tokens, onSelectDay }: { entries: ScheduleEntry[]; tokens: ThemeTokens; onSelectDay: (day: DayIndex) => void }) {
+function WeekOverview({ entries, tokens, onEdit, onLoadExample }: { entries: ScheduleEntry[]; tokens: ThemeTokens; onEdit: (entry: ScheduleEntry) => void; onLoadExample: () => void }) {
+  const visibleDays = DAYS.filter((day) => entries.some((entry) => entry.day === day.index));
+  if (visibleDays.length === 0) {
+    return <View style={styles.emptyState}>
+      <View style={[styles.emptyStateIcon, { backgroundColor: tokens.slateSoft }]}>
+        <Icon name="calendar-outline" color={tokens.slate} size={28} />
+      </View>
+      <Text style={[styles.emptyStateTitle, { color: tokens.text }]}>Sin clases</Text>
+      <Pressable onPress={onLoadExample} accessibilityRole="button" accessibilityLabel="Cargar un horario de ejemplo" style={({ pressed }) => [styles.textAction, pressed && styles.pressed]}>
+        <Text style={[styles.textActionText, { color: tokens.slate }]}>Cargar un ejemplo</Text>
+      </Pressable>
+    </View>;
+  }
   return (
     <View style={styles.weekList}>
-      {DAYS.map((day) => {
+      {visibleDays.map((day) => {
         const dayEntries = sortedEntries(entries.filter((entry) => entry.day === day.index));
         return (
           <View key={day.index}>
             <Text accessibilityRole="header" style={[styles.sectionLabel, { color: tokens.secondary }]}>{day.long}</Text>
-            <Pressable onPress={() => onSelectDay(day.index)} accessibilityRole="button" accessibilityLabel={`Abrir ${day.long}, ${dayEntries.length} ${dayEntries.length === 1 ? 'clase' : 'clases'}`} style={({ pressed }) => [styles.agendaGroup, { backgroundColor: tokens.surface }, pressed && styles.pressed]}>
-              {dayEntries.length ? dayEntries.map((entry) => <AgendaContent key={entry.id} entry={entry} tokens={tokens} />) : <Text style={[styles.freeDay, { color: tokens.secondary }]}>Día libre</Text>}
-            </Pressable>
+            <View style={[styles.agendaGroup, { backgroundColor: tokens.surface }]}>
+              {dayEntries.map((entry) => <ScheduleEntryRow key={entry.id} entry={entry} tokens={tokens} onPress={() => onEdit(entry)} />)}
+            </View>
           </View>
         );
       })}
@@ -679,7 +722,7 @@ function WeekOverview({ entries, tokens, onSelectDay }: { entries: ScheduleEntry
   );
 }
 
-function ScheduleScreen({ entries, tokens, selectedDay, onSelectDay, onCreate, onEdit, onLoadExample, onBack, loading, error, onRetry, view, setView }: { entries: ScheduleEntry[]; tokens: ThemeTokens; selectedDay: DayIndex; onSelectDay: (day: DayIndex) => void; onCreate: () => void; onEdit: (entry: ScheduleEntry) => void; onLoadExample: () => void; onBack: () => void; loading: boolean; error: string | null; onRetry: () => void; view: ScheduleView; setView: (view: ScheduleView) => void }) {
+function ScheduleScreen({ entries, tokens, selectedDay, onCreate, onEdit, onLoadExample, onBack, loading, error, onRetry, view, setView }: { entries: ScheduleEntry[]; tokens: ThemeTokens; selectedDay: DayIndex; onCreate: () => void; onEdit: (entry: ScheduleEntry) => void; onLoadExample: () => void; onBack: () => void; loading: boolean; error: string | null; onRetry: () => void; view: ScheduleView; setView: (view: ScheduleView) => void }) {
 
   return (
     <View style={[styles.screen, { backgroundColor: tokens.background }]}>
@@ -702,11 +745,10 @@ function ScheduleScreen({ entries, tokens, selectedDay, onSelectDay, onCreate, o
           </View>
         ) : view === 'day' ? (
           <>
-            <DayPicker selectedDay={selectedDay} onChange={onSelectDay} tokens={tokens} />
             <DayAgenda selectedDay={selectedDay} entries={entries} tokens={tokens} onEdit={onEdit} onLoadExample={onLoadExample} />
           </>
         ) : (
-          <WeekOverview entries={entries} tokens={tokens} onSelectDay={(day) => { onSelectDay(day); setView('day'); }} />
+          <WeekOverview entries={entries} tokens={tokens} onEdit={onEdit} onLoadExample={onLoadExample} />
         )}
       </ScrollView>
     </View>
@@ -930,12 +972,12 @@ function AppContent() {
       if (entry.id === nextEntry.id || entry.day !== nextEntry.day) return false;
       return minutesFromTime(nextEntry.start) < minutesFromTime(entry.end) && minutesFromTime(nextEntry.end) > minutesFromTime(entry.start);
     });
-    if (conflict) return `Se cruza con “${conflict.title}”, de ${conflict.start} a ${conflict.end}.`;
+    if (conflict) return `Se cruza con “${conflict.title}”, de ${formatScheduleTime(conflict.start)} a ${formatScheduleTime(conflict.end)}.`;
 
     const nextEntries = sortedEntries([...entries.filter((entry) => entry.id !== nextEntry.id), nextEntry]);
     try {
       await persistEntries(nextEntries);
-      setSelectedDay(nextEntry.day);
+      setSelectedDay(currentDayIndex());
       setEditorVisible(false);
       setEditorEntry(null);
       setStorageError(null);
@@ -977,7 +1019,7 @@ function AppContent() {
     void (async () => {
       try {
         await persistEntries(EXAMPLE_SCHEDULE);
-        setSelectedDay(EXAMPLE_SCHEDULE[0].day);
+      setSelectedDay(currentDayIndex());
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } catch {
         showError('No se pudo cargar el ejemplo. Intenta cargarlo de nuevo.');
@@ -991,7 +1033,7 @@ function AppContent() {
   };
 
   const body = destination === 'schedule' && screen === 'miniapps' ? (
-    <ScheduleScreen entries={entries} tokens={tokens} selectedDay={selectedDay} onSelectDay={setSelectedDay} onCreate={() => openEditor()} onEdit={openEditor} onLoadExample={loadExample} onBack={() => setDestination('library')} loading={loading} error={storageError} onRetry={loadData} view={scheduleView} setView={setScheduleView} />
+    <ScheduleScreen entries={entries} tokens={tokens} selectedDay={selectedDay} onCreate={() => openEditor()} onEdit={openEditor} onLoadExample={loadExample} onBack={() => setDestination('library')} loading={loading} error={storageError} onRetry={loadData} view={scheduleView} setView={setScheduleView} />
   ) : destination === 'downloader' && screen === 'miniapps' ? null
   : screen === 'home' ? (
     <HomeScreen entries={entries} tokens={tokens} loading={loading} error={storageError} onRetry={loadData} onOpenSchedule={() => openSchedule(currentDayIndex())} />
@@ -1115,7 +1157,7 @@ const styles = StyleSheet.create({
   scheduleTitle: { fontSize: 17, lineHeight: 23, fontWeight: '600' },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 7 },
   metaText: { flexShrink: 1, fontSize: 15, lineHeight: 21 },
-  emptyState: { borderRadius: 20, borderCurve: 'continuous', padding: 32, alignItems: 'center', marginTop: 2 },
+  emptyState: { minHeight: 160, paddingVertical: 24, paddingHorizontal: 20, alignItems: 'center', justifyContent: 'center', marginTop: 2 },
   emptyStateIcon: { width: 62, height: 62, borderRadius: 22, justifyContent: 'center', alignItems: 'center', marginBottom: 17 },
   emptyStateTitle: { fontSize: 20, lineHeight: 26, fontWeight: '700', textAlign: 'center' },
   solidAction: { minHeight: 48, paddingHorizontal: 18, borderRadius: 15, flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 20 },
@@ -1136,10 +1178,19 @@ const styles = StyleSheet.create({
   stateBody: { fontSize: 14, lineHeight: 20, marginTop: 5, textAlign: 'center' },
   downloaderSurface: { borderRadius: 20, borderCurve: 'continuous', padding: 20 },
   downloaderInput: { minHeight: 52, borderWidth: 1, borderRadius: 14, paddingHorizontal: 14, fontSize: 16 },
-  downloaderResult: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, borderRadius: 16, padding: 13, marginTop: 18 },
+  downloaderLinkRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  downloaderSourceBadge: { width: 36, height: 36, borderRadius: 10, borderCurve: 'continuous', justifyContent: 'center', alignItems: 'center', flexShrink: 0 },
+  downloaderSourceBadgeText: { fontSize: 12, fontWeight: '800' },
+  downloaderInputInline: { flex: 1, minWidth: 0, minHeight: 52, borderWidth: 1, borderRadius: 14, paddingHorizontal: 14, fontSize: 16 },
+  downloaderResult: { borderRadius: 16, borderCurve: 'continuous', borderWidth: 1, padding: 13, marginTop: 18, gap: 10 },
+  downloaderResultHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   downloaderResultCopy: { flex: 1, minWidth: 0 },
   downloaderResultTitle: { fontSize: 16, lineHeight: 21, fontWeight: '700' },
   downloaderResultMeta: { fontSize: 13, lineHeight: 18, marginTop: 4 },
+  downloaderDescription: { fontSize: 14, lineHeight: 20, marginTop: 10 },
+  downloaderLoading: { alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 14, minHeight: 44 },
+  downloaderLoadingText: { fontSize: 14, lineHeight: 20, fontWeight: '600' },
+  downloaderSelect: { minHeight: 44, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, marginTop: 8, fontSize: 15 },
   downloaderFormatLabel: { marginTop: 20 },
   downloaderModeRow: { flexDirection: 'row', borderWidth: 1, borderRadius: 14, padding: 4, gap: 4, marginTop: 16 },
   downloaderMode: { flex: 1, minHeight: 46, borderWidth: 1, borderColor: 'transparent', borderRadius: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
@@ -1172,10 +1223,12 @@ const styles = StyleSheet.create({
   deleteButtonText: { fontSize: 14, fontWeight: '700' },
   glassButtonPressable: { alignSelf: 'flex-start', minHeight: 52 },
   glassButtonFullWidthPressable: { alignSelf: 'stretch' },
+  glassButtonInlinePressable: { flexShrink: 0, minHeight: 44 },
   disabledControl: { opacity: 0.45 },
   glassButtonCompact: { alignSelf: 'auto', minHeight: 48 },
   glassButton: { minHeight: 52, paddingHorizontal: 16, borderRadius: 17, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   glassButtonFullWidth: { width: '100%' },
+  glassButtonInline: { minHeight: 44, paddingHorizontal: 13, borderRadius: 14, gap: 6 },
   glassButtonCompactSurface: { minWidth: CIRCLE_CONTROL_SIZE, minHeight: CIRCLE_CONTROL_SIZE, width: CIRCLE_CONTROL_SIZE, paddingHorizontal: 0, borderRadius: CIRCLE_CONTROL_SIZE / 2 },
   glassButtonText: { fontSize: 15, fontWeight: '700' },
   iconButton: { width: CIRCLE_CONTROL_SIZE, height: CIRCLE_CONTROL_SIZE },

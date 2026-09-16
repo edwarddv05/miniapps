@@ -8,6 +8,14 @@ export type ScheduleEntry = {
   color: 'slate' | 'coral' | 'sage';
 };
 
+export function formatScheduleTime(value: string) {
+  const [hours, minutes] = value.split(':').map(Number);
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return value;
+  const period = hours >= 12 ? 'PM' : 'AM';
+  const hour = hours % 12 || 12;
+  return `${hour}:${String(minutes).padStart(2, '0')} ${period}`;
+}
+
 export function todayAgenda(entries: ScheduleEntry[], now: Date) {
   const day = (now.getDay() + 6) % 7;
   const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
