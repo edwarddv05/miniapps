@@ -1,10 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { BlurView } from 'expo-blur';
 import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from 'expo-glass-effect';
 import * as Haptics from 'expo-haptics';
 import { StatusBar } from 'expo-status-bar';
 import { ComponentProps, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { formatScheduleTime, parseSchedule, todayAgenda, type ScheduleEntry } from './schedule-data';
+import { getGeminiApiKey, pickImagesAndScan, setGeminiApiKey } from './ai-schedule-scanner';
 import { useCurrentTime } from './use-current-time';
 import { UI, type MiniappDestination } from './ui-structure';
 import { analyzeUrl, detectDownloadSource, downloadFromService, downloaderErrorMessage, formatDuration, saveDownload, type DownloadAnalysis, type DownloadMode, type DownloadSource } from './downloader-api';
@@ -12,6 +14,8 @@ import {
   Alert,
   AccessibilityInfo,
   ActivityIndicator,
+  Animated,
+  Easing,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -131,13 +135,6 @@ const DARK: ThemeTokens = {
   inverseText: '#14161C',
 };
 
-const EXAMPLE_SCHEDULE: ScheduleEntry[] = [
-  { id: 'example-1', title: 'Diseño de producto', day: 0, start: '08:30', end: '10:00', location: 'Aula 203', color: 'slate' },
-  { id: 'example-2', title: 'Inglés', day: 1, start: '11:00', end: '12:00', location: 'Sala 4', color: 'coral' },
-  { id: 'example-3', title: 'Programación', day: 2, start: '09:00', end: '10:30', location: 'Laboratorio', color: 'sage' },
-  { id: 'example-4', title: 'Investigación', day: 3, start: '14:00', end: '15:30', location: '', color: 'slate' },
-];
-
 function getTokens(themeMode: ThemeMode, systemScheme: 'light' | 'dark' | 'unspecified' | null | undefined): ThemeTokens {
   const isDark = themeMode === 'dark' || (themeMode === 'system' && systemScheme === 'dark');
   return isDark ? DARK : LIGHT;
@@ -165,6 +162,10 @@ function sortedEntries(entries: ScheduleEntry[]) {
   return [...entries].sort((a, b) => a.start.localeCompare(b.start));
 }
 
+function capitalize(value: string) {
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
+}
+
 function GlassSurface({
   children,
   style,
@@ -181,32 +182,59 @@ function GlassSurface({
   accessibilityLabel?: string;
 }) {
   const glassAvailable = isLiquidGlassAvailable() && isGlassEffectAPIAvailable();
-  const fallbackStyle: StyleProp<ViewStyle> = [
-    { borderRadius: 20, borderWidth: 1, borderColor: tintColor ?? tokens.borderStrong, overflow: 'visible' },
-    { backgroundColor: tintColor ?? (tokens.mode === 'dark' ? 'rgba(37, 43, 54, 0.96)' : 'rgba(255, 255, 255, 0.94)') },
-    style,
-  ];
 
-  if (!glassAvailable) {
+  if (glassAvailable) {
     return (
-      <View style={fallbackStyle} accessible={Boolean(accessibilityLabel)} accessibilityLabel={accessibilityLabel}>
+      <GlassView
+        style={style}
+        glassEffectStyle="regular"
+        colorScheme={tokens.mode}
+        isInteractive={interactive}
+        tintColor={tintColor}
+        accessible={Boolean(accessibilityLabel)}
+        accessibilityLabel={accessibilityLabel}
+      >
         {children}
-      </View>
+      </GlassView>
     );
   }
 
+  const isDark = tokens.mode === 'dark';
+  const flattened = StyleSheet.flatten(style) || {};
+  const borderRadius = flattened.borderRadius ?? 20;
+
   return (
-    <GlassView
-      style={style}
-      glassEffectStyle="regular"
-      colorScheme={tokens.mode}
-      isInteractive={interactive}
-      tintColor={tintColor}
+    <View
+      style={[
+        {
+          borderRadius,
+          overflow: 'hidden',
+          borderWidth: 1,
+          borderColor: tintColor
+            ? (isDark ? 'rgba(125, 176, 255, 0.4)' : 'rgba(10, 102, 232, 0.35)')
+            : (isDark ? 'rgba(255, 255, 255, 0.16)' : 'rgba(255, 255, 255, 0.7)'),
+          borderTopColor: tintColor
+            ? (isDark ? 'rgba(125, 176, 255, 0.75)' : 'rgba(10, 102, 232, 0.65)')
+            : (isDark ? 'rgba(255, 255, 255, 0.35)' : 'rgba(255, 255, 255, 0.95)'),
+          borderBottomColor: tintColor
+            ? (isDark ? 'rgba(125, 176, 255, 0.2)' : 'rgba(10, 102, 232, 0.2)')
+            : (isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.04)'),
+          backgroundColor: tintColor
+            ? (isDark ? 'rgba(10, 102, 232, 0.72)' : 'rgba(10, 102, 232, 0.85)')
+            : (isDark ? 'rgba(32, 37, 46, 0.55)' : 'rgba(255, 255, 255, 0.65)'),
+        },
+        style,
+      ]}
       accessible={Boolean(accessibilityLabel)}
       accessibilityLabel={accessibilityLabel}
     >
+      <BlurView
+        tint={isDark ? 'systemMaterialDark' : 'systemMaterialLight'}
+        intensity={Platform.OS === 'ios' ? 90 : 70}
+        style={StyleSheet.absoluteFill}
+      />
       {children}
-    </GlassView>
+    </View>
   );
 }
 
@@ -260,19 +288,95 @@ function SourceBadge({ source, tokens }: { source: DownloadSource; tokens: Theme
   </View>;
 }
 
-function IconButton({ label, icon, onPress, tokens, tintColor = tokens.blue, iconColor = tokens.inverseText, disabled = false, accessibilityHint }: { label: string; icon: IconName; onPress: () => void; tokens: ThemeTokens; tintColor?: string; iconColor?: string; disabled?: boolean; accessibilityHint?: string }) {
+function AnimatedSparkles({ color, size = 20, isScanning = false }: { color: string; size?: number; isScanning?: boolean }) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const rotate = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (isScanning) {
+      const loopRotate = Animated.loop(
+        Animated.timing(rotate, {
+          toValue: 1,
+          duration: 1200,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        })
+      );
+      loopRotate.start();
+      return () => loopRotate.stop();
+    } else {
+      rotate.setValue(0);
+      const loopPulse = Animated.loop(
+        Animated.sequence([
+          Animated.timing(scale, {
+            toValue: 1.25,
+            duration: 850,
+            useNativeDriver: true,
+          }),
+          Animated.timing(scale, {
+            toValue: 1.0,
+            duration: 850,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      loopPulse.start();
+      return () => loopPulse.stop();
+    }
+  }, [isScanning]);
+
+  const spin = rotate.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+
+  return (
+    <Animated.View style={{ transform: isScanning ? [{ rotate: spin }] : [{ scale }] }}>
+      <Icon name="sparkles" color={color} size={size} />
+    </Animated.View>
+  );
+}
+
+function IconButton({
+  label,
+  icon,
+  onPress,
+  tokens,
+  tintColor = tokens.blue,
+  iconColor = tokens.inverseText,
+  disabled = false,
+  accessibilityHint,
+  isScanning = false,
+}: {
+  label: string;
+  icon: IconName;
+  onPress: () => void;
+  tokens: ThemeTokens;
+  tintColor?: string;
+  iconColor?: string;
+  disabled?: boolean;
+  accessibilityHint?: string;
+  isScanning?: boolean;
+}) {
   return (
     <Pressable
       disabled={disabled}
       aria-disabled={disabled}
-      onPress={onPress}
+      onPress={() => {
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        onPress();
+      }}
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityHint={accessibilityHint}
       style={({ pressed }) => [styles.iconButton, disabled && { opacity: 0.5 }, pressed && styles.pressed]}
     >
       <GlassSurface tokens={tokens} interactive={!disabled} tintColor={tintColor} style={styles.iconButtonSurface}>
-        <Icon name={icon} color={iconColor} size={21} />
+        {icon === 'sparkles' ? (
+          <AnimatedSparkles color={iconColor} size={21} isScanning={isScanning} />
+        ) : (
+          <Icon name={icon} color={iconColor} size={21} />
+        )}
       </GlassSurface>
     </Pressable>
   );
@@ -348,7 +452,7 @@ function HomeScreen({ entries, tokens, loading, error, onRetry, onOpenSchedule }
     <ScrollView contentContainerStyle={[styles.scrollContent, styles.homeContent]} showsVerticalScrollIndicator={false}>
       <View style={styles.homeIntro}>
         <Text accessibilityRole="header" style={[styles.heroTitle, { color: tokens.text }]}>Hoy</Text>
-        <Text style={[styles.todayDate, { color: tokens.secondary }]}>{new Intl.DateTimeFormat('es-PE', { weekday: 'long', day: 'numeric', month: 'long' }).format(now)}</Text>
+        <Text style={[styles.todayDate, { color: tokens.secondary }]}>{capitalize(new Intl.DateTimeFormat('es-PE', { weekday: 'long', day: 'numeric', month: 'long' }).format(now))}</Text>
       </View>
 
       <View style={[styles.todayCard, { backgroundColor: tokens.surface, borderColor: tokens.border }]}>
@@ -359,11 +463,30 @@ function HomeScreen({ entries, tokens, loading, error, onRetry, onOpenSchedule }
             {error ? <Pressable onPress={onRetry} accessibilityRole="button" accessibilityLabel="Intentar cargar de nuevo" style={({ pressed }) => [styles.textAction, pressed && styles.pressed]}><Text style={[styles.textActionText, { color: tokens.slate }]}>Reintentar</Text></Pressable> : null}
           </View>
         ) : <View style={styles.todayFocus}>
-          {next ? <Text style={[styles.todayState, { color: tokens.secondary }]}>{ongoing ? 'En curso' : 'A continuación'}</Text> : null}
+          {next ? (
+            <View style={styles.focusHeaderRow}>
+              <View style={[styles.statusPill, { backgroundColor: ongoing ? tokens.blueSoft : tokens.slateSoft }]}>
+                <View style={[styles.statusPillDot, { backgroundColor: ongoing ? tokens.blue : tokens.slate }]} />
+                <Text style={[styles.statusPillText, { color: ongoing ? tokens.blue : tokens.slate }]}>
+                  {ongoing ? 'En curso' : 'A continuación'}
+                </Text>
+              </View>
+              {ongoing ? (
+                <Text style={[styles.progressPercentText, { color: tokens.blue }]}>
+                  {Math.round(Math.min(1, Math.max(0, (now.getHours() * 60 + now.getMinutes() - minutesFromTime(next.start)) / (minutesFromTime(next.end) - minutesFromTime(next.start)))) * 100)}%
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
           {next ? <>
             <Text style={[styles.todayTime, { color: tokens.text }]}>{formatScheduleTime(next.start)}</Text>
             <Text style={[styles.todayTitle, { color: tokens.text }]}>{next.title}</Text>
             <Text style={[styles.todayMeta, { color: tokens.secondary }]}>{[`${formatScheduleTime(next.start)} a ${formatScheduleTime(next.end)}`, next.location].filter(Boolean).join(' · ')}</Text>
+            {ongoing ? (
+              <View style={[styles.ongoingProgressTrack, { backgroundColor: tokens.mode === 'dark' ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.06)' }]}>
+                <View style={[styles.ongoingProgressBar, { width: `${Math.min(100, Math.max(0, ((now.getHours() * 60 + now.getMinutes() - minutesFromTime(next.start)) / (minutesFromTime(next.end) - minutesFromTime(next.start))) * 100))}%`, backgroundColor: tokens.blue }]} />
+              </View>
+            ) : null}
           </> : <View style={[styles.emptyPreview, { backgroundColor: tokens.slateSoft }]}>
             <Icon name={emptyIcon} color={tokens.slate} size={22} />
             <View style={styles.emptyPreviewCopy}>
@@ -568,7 +691,7 @@ function MiniAppRow({ title, detail, icon, iconColor, iconBackground, tokens, on
   );
 }
 
-function SettingsScreen({ themeMode, tokens, onThemeChange }: { themeMode: ThemeMode; tokens: ThemeTokens; onThemeChange: (mode: ThemeMode) => void }) {
+function SettingsScreen({ themeMode, tokens, onThemeChange, apiKey, onApiKeyChange }: { themeMode: ThemeMode; tokens: ThemeTokens; onThemeChange: (mode: ThemeMode) => void; apiKey: string; onApiKeyChange: (key: string) => void }) {
   return (
     <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
       <ScreenHeader title="Ajustes" tokens={tokens} />
@@ -588,6 +711,38 @@ function SettingsScreen({ themeMode, tokens, onThemeChange }: { themeMode: Theme
             );
           })}
         </View>
+      </View>
+
+      <View style={[styles.settingsSection, { backgroundColor: tokens.surface, borderColor: tokens.border }]}>
+        <Text style={[styles.settingTitle, { color: tokens.secondary }]}>Inteligencia Artificial</Text>
+        <Text style={{ fontSize: 13, lineHeight: 18, color: tokens.muted, marginTop: 4, marginBottom: 12 }}>
+          Clave gratuita de Google Gemini (aistudio.google.com) para escanear y generar horarios desde fotos o capturas.
+        </Text>
+        <TextInput
+          value={apiKey}
+          onChangeText={onApiKeyChange}
+          placeholder="Pega tu clave AIzaSy…"
+          placeholderTextColor={tokens.muted}
+          secureTextEntry
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={{
+            backgroundColor: tokens.background,
+            color: tokens.text,
+            paddingHorizontal: 12,
+            paddingVertical: 10,
+            borderRadius: 10,
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: tokens.border,
+            fontSize: 15,
+          }}
+        />
+        {apiKey ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 }}>
+            <Icon name="checkmark-circle" color={tokens.sage} size={16} />
+            <Text style={{ fontSize: 13, color: tokens.sage, fontWeight: '600' }}>Clave configurada</Text>
+          </View>
+        ) : null}
       </View>
     </ScrollView>
   );
@@ -663,7 +818,7 @@ function AgendaContent({ entry, tokens }: { entry: ScheduleEntry; tokens: ThemeT
   );
 }
 
-function DayAgenda({ selectedDay, entries, tokens, onEdit, onLoadExample }: { selectedDay: DayIndex; entries: ScheduleEntry[]; tokens: ThemeTokens; onEdit: (entry: ScheduleEntry) => void; onLoadExample: () => void }) {
+function DayAgenda({ selectedDay, entries, tokens, onEdit, onScanAI, isScanningAI }: { selectedDay: DayIndex; entries: ScheduleEntry[]; tokens: ThemeTokens; onEdit: (entry: ScheduleEntry) => void; onScanAI?: () => void; isScanningAI?: boolean }) {
   const dayEntries = sortedEntries(entries.filter((entry) => entry.day === selectedDay));
 
   if (dayEntries.length === 0) {
@@ -673,9 +828,16 @@ function DayAgenda({ selectedDay, entries, tokens, onEdit, onLoadExample }: { se
           <Icon name="calendar-clear-outline" color={tokens.slate} size={28} />
         </View>
         <Text style={[styles.emptyStateTitle, { color: tokens.text }]}>{entries.length === 0 ? 'Sin clases' : 'Día libre'}</Text>
-        {entries.length === 0 ? (
-          <Pressable onPress={onLoadExample} accessibilityRole="button" accessibilityLabel="Cargar un horario de ejemplo" style={({ pressed }) => [styles.textAction, pressed && styles.pressed]}>
-            <Text style={[styles.textActionText, { color: tokens.slate }]}>Cargar un ejemplo</Text>
+        {entries.length === 0 && onScanAI ? (
+          <Pressable
+            onPress={onScanAI}
+            accessibilityRole="button"
+            accessibilityLabel="Escanear horario"
+            style={({ pressed }) => [styles.solidAction, { backgroundColor: tokens.blue }, pressed && styles.pressed]}>
+            <Icon name="sparkles" color={tokens.inverseText} size={18} />
+            <Text style={[styles.solidActionText, { color: tokens.inverseText }]}>
+              {isScanningAI ? 'Escaneando...' : 'Escanear horario'}
+            </Text>
           </Pressable>
         ) : null}
       </View>
@@ -692,7 +854,7 @@ function DayAgenda({ selectedDay, entries, tokens, onEdit, onLoadExample }: { se
   );
 }
 
-function WeekOverview({ entries, tokens, onEdit, onLoadExample }: { entries: ScheduleEntry[]; tokens: ThemeTokens; onEdit: (entry: ScheduleEntry) => void; onLoadExample: () => void }) {
+function WeekOverview({ entries, tokens, onEdit, onScanAI, isScanningAI }: { entries: ScheduleEntry[]; tokens: ThemeTokens; onEdit: (entry: ScheduleEntry) => void; onScanAI?: () => void; isScanningAI?: boolean }) {
   const visibleDays = DAYS.filter((day) => entries.some((entry) => entry.day === day.index));
   if (visibleDays.length === 0) {
     return <View style={styles.emptyState}>
@@ -700,9 +862,18 @@ function WeekOverview({ entries, tokens, onEdit, onLoadExample }: { entries: Sch
         <Icon name="calendar-outline" color={tokens.slate} size={28} />
       </View>
       <Text style={[styles.emptyStateTitle, { color: tokens.text }]}>Sin clases</Text>
-      <Pressable onPress={onLoadExample} accessibilityRole="button" accessibilityLabel="Cargar un horario de ejemplo" style={({ pressed }) => [styles.textAction, pressed && styles.pressed]}>
-        <Text style={[styles.textActionText, { color: tokens.slate }]}>Cargar un ejemplo</Text>
-      </Pressable>
+      {onScanAI ? (
+        <Pressable
+          onPress={onScanAI}
+          accessibilityRole="button"
+          accessibilityLabel="Escanear horario"
+          style={({ pressed }) => [styles.solidAction, { backgroundColor: tokens.blue }, pressed && styles.pressed]}>
+          <Icon name="sparkles" color={tokens.inverseText} size={18} />
+          <Text style={[styles.solidActionText, { color: tokens.inverseText }]}>
+            {isScanningAI ? 'Escaneando...' : 'Escanear horario'}
+          </Text>
+        </Pressable>
+      ) : null}
     </View>;
   }
   return (
@@ -722,12 +893,58 @@ function WeekOverview({ entries, tokens, onEdit, onLoadExample }: { entries: Sch
   );
 }
 
-function ScheduleScreen({ entries, tokens, selectedDay, onCreate, onEdit, onLoadExample, onBack, loading, error, onRetry, view, setView }: { entries: ScheduleEntry[]; tokens: ThemeTokens; selectedDay: DayIndex; onCreate: () => void; onEdit: (entry: ScheduleEntry) => void; onLoadExample: () => void; onBack: () => void; loading: boolean; error: string | null; onRetry: () => void; view: ScheduleView; setView: (view: ScheduleView) => void }) {
+function ScheduleScreen({
+  entries,
+  tokens,
+  selectedDay,
+  onCreate,
+  onScanAI,
+  isScanningAI,
+  onEdit,
+  onBack,
+  loading,
+  error,
+  onRetry,
+  view,
+  setView,
+}: {
+  entries: ScheduleEntry[];
+  tokens: ThemeTokens;
+  selectedDay: DayIndex;
+  onCreate: () => void;
+  onScanAI?: () => void;
+  isScanningAI?: boolean;
+  onEdit: (entry: ScheduleEntry) => void;
+  onBack: () => void;
+  loading: boolean;
+  error: string | null;
+  onRetry: () => void;
+  view: ScheduleView;
+  setView: (view: ScheduleView) => void;
+}) {
 
   return (
     <View style={[styles.screen, { backgroundColor: tokens.background }]}>
       <ScrollView contentContainerStyle={[styles.scrollContent, styles.scheduleContent]} showsVerticalScrollIndicator={false}>
-        <ScreenHeader title="Horario" tokens={tokens} onBack={onBack} right={<IconButton label="Añadir clase" icon="add" onPress={onCreate} tokens={tokens} disabled={loading || Boolean(error)} />} />
+        <ScreenHeader
+          title="Horario"
+          tokens={tokens}
+          onBack={onBack}
+          right={
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              {onScanAI ? (
+                <IconButton
+                  label={isScanningAI ? 'Escaneando...' : 'Escanear horario'}
+                  icon={isScanningAI ? 'sync-outline' : 'sparkles'}
+                  onPress={onScanAI}
+                  tokens={tokens}
+                  disabled={loading || Boolean(error) || isScanningAI}
+                />
+              ) : null}
+              <IconButton label="Añadir clase" icon="add" onPress={onCreate} tokens={tokens} disabled={loading || Boolean(error)} />
+            </View>
+          }
+        />
         <SegmentedControl value={view} onChange={setView} tokens={tokens} />
         {loading ? (
           <View style={[styles.statePanel, { backgroundColor: tokens.surface, borderColor: tokens.border }]} accessibilityLiveRegion="polite">
@@ -745,10 +962,10 @@ function ScheduleScreen({ entries, tokens, selectedDay, onCreate, onEdit, onLoad
           </View>
         ) : view === 'day' ? (
           <>
-            <DayAgenda selectedDay={selectedDay} entries={entries} tokens={tokens} onEdit={onEdit} onLoadExample={onLoadExample} />
+            <DayAgenda selectedDay={selectedDay} entries={entries} tokens={tokens} onEdit={onEdit} onScanAI={onScanAI} isScanningAI={isScanningAI} />
           </>
         ) : (
-          <WeekOverview entries={entries} tokens={tokens} onEdit={onEdit} onLoadExample={onLoadExample} />
+          <WeekOverview entries={entries} tokens={tokens} onEdit={onEdit} onScanAI={onScanAI} isScanningAI={isScanningAI} />
         )}
       </ScrollView>
     </View>
@@ -904,6 +1121,203 @@ function ScheduleEditor({ visible, entry, defaultDay, tokens, onClose, onSave, o
   );
 }
 
+function AIScanReviewModal({
+  visible,
+  scanned,
+  tokens,
+  onImport,
+  onClose,
+}: {
+  visible: boolean;
+  scanned: ScheduleEntry[] | null;
+  tokens: ThemeTokens;
+  onImport: (entries: ScheduleEntry[]) => void;
+  onClose: () => void;
+}) {
+  const insets = useSafeAreaInsets();
+  const [revealedCount, setRevealedCount] = useState(0);
+  const [processedIndex, setProcessedIndex] = useState(-1);
+  const [isImporting, setIsImporting] = useState(false);
+
+  useEffect(() => {
+    if (!visible || !scanned || scanned.length === 0) {
+      setRevealedCount(0);
+      setProcessedIndex(-1);
+      setIsImporting(false);
+      return;
+    }
+
+    setRevealedCount(0);
+    setProcessedIndex(-1);
+    setIsImporting(false);
+
+    let current = 0;
+    const interval = setInterval(() => {
+      current++;
+      setRevealedCount(current);
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      if (current >= scanned.length) {
+        clearInterval(interval);
+      }
+    }, 70);
+
+    return () => clearInterval(interval);
+  }, [visible, scanned]);
+
+  if (!visible || !scanned) return null;
+
+  const isDoneRevealing = revealedCount >= scanned.length;
+  const visibleEntries = scanned.slice(0, revealedCount);
+
+  const startImporting = () => {
+    if (isImporting || !isDoneRevealing) return;
+    setIsImporting(true);
+
+    let current = 0;
+    const interval = setInterval(() => {
+      setProcessedIndex(current);
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      current++;
+
+      if (current >= scanned.length) {
+        clearInterval(interval);
+        setTimeout(() => {
+          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          onImport(scanned);
+        }, 350);
+      }
+    }, 90);
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <View role="dialog" aria-modal accessibilityLabel="Horario detectado" style={[styles.modalRoot, { backgroundColor: tokens.background }]}>
+        <View style={[styles.editorHeader, { paddingTop: Math.max(insets.top, UI.sheetActionInset) }]}>
+          <IconButton label="Cerrar" icon="close" onPress={onClose} tokens={tokens} tintColor={tokens.surface} iconColor={tokens.text} disabled={isImporting} />
+          <View style={{ alignItems: 'center' }}>
+            <Text accessibilityRole="header" style={[styles.editorHeading, { color: tokens.text }]}>
+              Horario detectado
+            </Text>
+            <Text style={{ fontSize: 13, color: tokens.secondary, marginTop: 2 }}>
+              {isImporting
+                ? `Guardando ${processedIndex + 1} de ${scanned.length} clases…`
+                : `${visibleEntries.length} de ${scanned.length} clases identificadas`}
+            </Text>
+          </View>
+          <IconButton
+            label="Importar clases"
+            icon="checkmark"
+            onPress={startImporting}
+            tokens={tokens}
+            disabled={!isDoneRevealing || isImporting}
+          />
+        </View>
+
+        <ScrollView contentContainerStyle={[styles.editorContent, { paddingBottom: Math.max(insets.bottom, 24) }]} showsVerticalScrollIndicator={false}>
+          <View style={{ gap: 10 }}>
+            {visibleEntries.map((entry, index) => {
+              const entryColor = colorForKey(entry.color, tokens);
+              const isProcessed = isImporting && index <= processedIndex;
+
+              return (
+                <View
+                  key={entry.id}
+                  style={{
+                    backgroundColor: isProcessed ? tokens.surfaceRaised : tokens.surface,
+                    borderRadius: 16,
+                    padding: 14,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 12,
+                    borderWidth: 1,
+                    borderColor: isProcessed ? tokens.sage : 'transparent',
+                  }}>
+                  <View style={{ minWidth: 56, alignItems: 'center' }}>
+                    <Text style={{ fontSize: 15, fontWeight: '700', color: tokens.blue }}>{DAYS[entry.day].short}</Text>
+                    <Text style={{ fontSize: 12, color: tokens.secondary, marginTop: 2 }}>{formatScheduleTime(entry.start)}</Text>
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      {isProcessed ? (
+                        <Icon name="checkmark-circle" color={tokens.sage} size={16} />
+                      ) : (
+                        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: entryColor.main }} />
+                      )}
+                      <Text style={{ fontSize: 16, fontWeight: '600', color: tokens.text }} numberOfLines={1}>{entry.title}</Text>
+                    </View>
+                    <Text style={{ fontSize: 13, color: tokens.secondary, marginTop: 4 }}>
+                      {[`${formatScheduleTime(entry.start)} a ${formatScheduleTime(entry.end)}`, entry.location].filter(Boolean).join(' · ')}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+function APIKeyModal({
+  visible,
+  tokens,
+  apiKey,
+  onSave,
+  onClose,
+}: {
+  visible: boolean;
+  tokens: ThemeTokens;
+  apiKey: string;
+  onSave: (key: string) => void;
+  onClose: () => void;
+}) {
+  const insets = useSafeAreaInsets();
+  const [draft, setDraft] = useState(apiKey);
+
+  useEffect(() => {
+    if (visible) setDraft(apiKey);
+  }, [visible, apiKey]);
+
+  if (!visible) return null;
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <View role="dialog" aria-modal accessibilityLabel="Configurar clave de Gemini" style={[styles.modalRoot, { backgroundColor: tokens.background }]}>
+        <View style={[styles.editorHeader, { paddingTop: Math.max(insets.top, UI.sheetActionInset) }]}>
+          <IconButton label="Cancelar" icon="close" onPress={onClose} tokens={tokens} tintColor={tokens.surface} iconColor={tokens.text} />
+          <Text accessibilityRole="header" style={[styles.editorHeading, { color: tokens.text }]}>API de Gemini</Text>
+          <IconButton
+            label="Guardar"
+            icon="checkmark"
+            onPress={() => {
+              onSave(draft);
+              onClose();
+            }}
+            tokens={tokens}
+          />
+        </View>
+
+        <ScrollView contentContainerStyle={[styles.editorContent, { paddingBottom: Math.max(insets.bottom, 24) }]} keyboardShouldPersistTaps="handled">
+          <View style={[styles.editorGroup, { backgroundColor: tokens.surface }]}>
+            <Text style={[styles.fieldLabel, { color: tokens.text }]}>Clave de API (AIzaSy…)</Text>
+            <TextInput
+              value={draft}
+              onChangeText={setDraft}
+              placeholder="Pega tu clave AIzaSy…"
+              placeholderTextColor={tokens.muted}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={[styles.textInput, { backgroundColor: tokens.surface, borderColor: tokens.borderStrong, color: tokens.text }]}
+            />
+          </View>
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
 function AppContent() {
   const systemScheme = useColorScheme();
   const insets = useSafeAreaInsets();
@@ -917,6 +1331,10 @@ function AppContent() {
   const [storageError, setStorageError] = useState<string | null>(null);
   const [editorEntry, setEditorEntry] = useState<ScheduleEntry | null>(null);
   const [editorVisible, setEditorVisible] = useState(false);
+  const [apiKey, setApiKey] = useState('');
+  const [aiScanning, setAiScanning] = useState(false);
+  const [scannedSchedule, setScannedSchedule] = useState<ScheduleEntry[] | null>(null);
+  const [apiKeyModalVisible, setApiKeyModalVisible] = useState(false);
   const writePending = useRef(false);
   const ready = !loading && !storageError;
   const tokens = useMemo(() => getTokens(themeMode, systemScheme), [themeMode, systemScheme]);
@@ -925,9 +1343,19 @@ function AppContent() {
     setLoading(true);
     setStorageError(null);
     try {
-      const [storedSchedule, storedTheme] = await Promise.all([AsyncStorage.getItem(STORAGE_KEY), AsyncStorage.getItem(THEME_KEY)]);
-      setEntries(parseSchedule(storedSchedule));
+      const [storedSchedule, storedTheme, storedApiKey] = await Promise.all([
+        AsyncStorage.getItem(STORAGE_KEY),
+        AsyncStorage.getItem(THEME_KEY),
+        getGeminiApiKey(),
+      ]);
+      const parsed = parseSchedule(storedSchedule);
+      const cleaned = parsed.filter((e) => !e.id.startsWith('example-'));
+      if (cleaned.length !== parsed.length) {
+        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
+      }
+      setEntries(cleaned);
       if (storedTheme === 'system' || storedTheme === 'light' || storedTheme === 'dark') setThemeMode(storedTheme);
+      if (storedApiKey) setApiKey(storedApiKey);
     } catch {
       setStorageError('No se pudo leer el horario. Reintenta para volver a cargarlo.');
     } finally {
@@ -938,6 +1366,54 @@ function AppContent() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  const updateApiKey = (key: string) => {
+    setApiKey(key);
+    void setGeminiApiKey(key);
+  };
+
+  const handleScanAI = async () => {
+    let activeKey = apiKey.trim();
+    if (!activeKey) {
+      activeKey = await getGeminiApiKey();
+      if (!activeKey) {
+        setApiKeyModalVisible(true);
+        return;
+      }
+      setApiKey(activeKey);
+    }
+
+    try {
+      setAiScanning(true);
+      const scanned = await pickImagesAndScan(activeKey);
+      if (scanned && scanned.length > 0) {
+        setScannedSchedule(scanned);
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showError(msg);
+    } finally {
+      setAiScanning(false);
+    }
+  };
+
+  const importScannedClasses = async (classesToImport: ScheduleEntry[]) => {
+    if (!classesToImport.length) return;
+    try {
+      const merged = sortedEntries([...entries, ...classesToImport]);
+      await persistEntries(merged);
+      setScannedSchedule(null);
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (Platform.OS === 'web') {
+        window.alert(`Se agregaron ${classesToImport.length} clases a tu horario.`);
+      } else {
+        Alert.alert('Horario importado', `Se agregaron ${classesToImport.length} clases a tu horario.`);
+      }
+    } catch {
+      showError('No se pudieron guardar las clases escaneadas.');
+    }
+  };
 
   const openSchedule = (day = selectedDay) => {
     setSelectedDay(day);
@@ -1014,33 +1490,34 @@ function AppContent() {
     })();
   };
 
-  const loadExample = () => {
-    if (!ready || entries.length || writePending.current) return;
-    void (async () => {
-      try {
-        await persistEntries(EXAMPLE_SCHEDULE);
-      setSelectedDay(currentDayIndex());
-        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      } catch {
-        showError('No se pudo cargar el ejemplo. Intenta cargarlo de nuevo.');
-      }
-    })();
-  };
-
   const changeTheme = (mode: ThemeMode) => {
     setThemeMode(mode);
     void AsyncStorage.setItem(THEME_KEY, mode).catch(() => showError('El tema está aplicado, pero no se pudo guardar. Vuelve a seleccionarlo para reintentar.'));
   };
 
   const body = destination === 'schedule' && screen === 'miniapps' ? (
-    <ScheduleScreen entries={entries} tokens={tokens} selectedDay={selectedDay} onCreate={() => openEditor()} onEdit={openEditor} onLoadExample={loadExample} onBack={() => setDestination('library')} loading={loading} error={storageError} onRetry={loadData} view={scheduleView} setView={setScheduleView} />
+    <ScheduleScreen
+      entries={entries}
+      tokens={tokens}
+      selectedDay={selectedDay}
+      onCreate={() => openEditor()}
+      onScanAI={handleScanAI}
+      isScanningAI={aiScanning}
+      onEdit={openEditor}
+      onBack={() => setDestination('library')}
+      loading={loading}
+      error={storageError}
+      onRetry={loadData}
+      view={scheduleView}
+      setView={setScheduleView}
+    />
   ) : destination === 'downloader' && screen === 'miniapps' ? null
   : screen === 'home' ? (
     <HomeScreen entries={entries} tokens={tokens} loading={loading} error={storageError} onRetry={loadData} onOpenSchedule={() => openSchedule(currentDayIndex())} />
   ) : screen === 'miniapps' ? (
     <MiniAppsScreen entries={entries} tokens={tokens} loading={loading} error={storageError} onRetry={loadData} onOpenSchedule={() => openSchedule()} onOpenDownloader={openDownloader} onClearSchedule={clearSchedule} />
   ) : (
-    <SettingsScreen themeMode={themeMode} tokens={tokens} onThemeChange={changeTheme} />
+    <SettingsScreen themeMode={themeMode} tokens={tokens} onThemeChange={changeTheme} apiKey={apiKey} onApiKeyChange={updateApiKey} />
   );
 
   return (
@@ -1054,6 +1531,8 @@ function AppContent() {
       <TabBar activeScreen={screen} onChange={setScreen} tokens={tokens} />
       </View>
       <ScheduleEditor visible={editorVisible} entry={editorEntry} defaultDay={selectedDay} tokens={tokens} onClose={() => setEditorVisible(false)} onSave={saveEntry} onDelete={deleteEntry} />
+      <AIScanReviewModal visible={Boolean(scannedSchedule)} scanned={scannedSchedule} tokens={tokens} onImport={importScannedClasses} onClose={() => setScannedSchedule(null)} />
+      <APIKeyModal visible={apiKeyModalVisible} tokens={tokens} apiKey={apiKey} onSave={updateApiKey} onClose={() => setApiKeyModalVisible(false)} />
     </View>
   );
 }
@@ -1081,7 +1560,14 @@ const styles = StyleSheet.create({
   editorGroup: { borderRadius: UI.groupRadius, padding: 16, marginBottom: 24 },
   editorHeading: { flex: 1, fontSize: 17, fontWeight: '600', textAlign: 'center', marginHorizontal: 12 },
   todayDate: { fontSize: 15, lineHeight: 22, marginTop: 12 },
-  todayFocus: { gap: 16, paddingVertical: 8 },
+  todayFocus: { gap: 14, paddingVertical: 4 },
+  focusHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  statusPill: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, borderCurve: 'continuous', gap: 6, alignSelf: 'flex-start' },
+  statusPillDot: { width: 7, height: 7, borderRadius: 4 },
+  statusPillText: { fontSize: 12, fontWeight: '700', letterSpacing: 0.2 },
+  progressPercentText: { fontSize: 12, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  ongoingProgressTrack: { height: 6, borderRadius: 3, overflow: 'hidden', marginTop: 4, marginBottom: 4 },
+  ongoingProgressBar: { height: '100%', borderRadius: 3 },
   todayState: { fontSize: 15, fontWeight: '600' },
   todayTime: { fontSize: 40, fontWeight: '700', letterSpacing: -1, fontVariant: ['tabular-nums'] },
   todayTitle: { fontSize: 24, lineHeight: 30, fontWeight: '600', letterSpacing: -0.4 },

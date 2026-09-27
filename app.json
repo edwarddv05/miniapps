@@ -25,7 +25,13 @@
     },
     "plugins": [
       "expo-font",
-      "expo-sharing"
+      "expo-sharing",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "La app necesita acceso a tus fotos para escanear y generar tu horario automáticamente."
+        }
+      ]
     ]
   }
 }

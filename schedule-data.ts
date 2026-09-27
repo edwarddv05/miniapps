@@ -1,11 +1,14 @@
+export type DayIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+export type ScheduleColor = 'slate' | 'coral' | 'sage';
+
 export type ScheduleEntry = {
   id: string;
   title: string;
-  day: 0 | 1 | 2 | 3 | 4 | 5 | 6;
+  day: DayIndex;
   start: string;
   end: string;
   location: string;
-  color: 'slate' | 'coral' | 'sage';
+  color: ScheduleColor;
 };
 
 export function formatScheduleTime(value: string) {

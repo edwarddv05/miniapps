@@ -12,6 +12,15 @@ This is a personal app for its owner, who already knows its tools. Do not add in
 
 These compositions supersede the older requirements below that prescribe a List for Home/Library, repeat a large tool title below back navigation, or put the download action in the URL field. Retain the functional constraints, data protection, semantic colors, native controls, and accessibility requirements below. The web fallback retains its existing working layout; native screenshots are the visual source of truth.
 
+## Liquid Glass refinement — September 2026
+
+- Hoy shows the date under the large title, not as an oversized numeral. The next-class card states the remaining time (`Termina en` / `Empieza en`); when today has nothing left it names the next class on a following day. `Después` is one solid grouped surface with dividers, followed by the seven-day `Semana` strip.
+- Biblioteca's Horario surface carries the same week strip as its real preview; the long-press clear action stays on that surface.
+- Tool headers centre the title in its own layer so unequal control groups on each side do not shift it. Peer glass controls sit in one `GlassEffectContainer` (`GlassControlGroup`) so iOS 26 renders them as a single Liquid Glass group.
+- Schedule scanning uses `text.viewfinder`, not sparkles, and shows a spinner inside the control while it runs. No continuous symbol animation. The empty schedule uses the native `ContentUnavailableView` with no action, because `+` and scan already live in the header.
+- The scan review sheet lists detected classes by weekday and lets the owner deselect any of them. Classes that overlap stored ones start deselected and name the overlap. Importing switches Horario to Semana; no success alert.
+- The Gemini key is entered in a `SecureField` and saved only on an explicit action. Saving it from the scan prompt continues the scan.
+
 ## Product
 
 My SuperApp is a quiet personal home for small, focused tools. The shipped tools are Horario, a weekly planner for seeing and editing recurring classes or commitments, and Downloader, a compact client for the local yt-dlp service.
