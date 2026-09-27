@@ -21,6 +21,14 @@ These compositions supersede the older requirements below that prescribe a List 
 - The scan review sheet lists detected classes by weekday and lets the owner deselect any of them. Classes that overlap stored ones start deselected and name the overlap. Importing switches Horario to Semana; no success alert.
 - The Gemini key is entered in a `SecureField` and saved only on an explicit action. Saving it from the scan prompt continues the scan.
 
+## Class colours and Downloader — September 2026
+
+- Classes choose from ten distinct hues backed by iOS system colours (`systemRed` … `systemBrown`), shown as a two-row swatch grid in the editor. They are user metadata on the dot beside a class; they never replace title, time or place. Legacy `slate`, `coral` and `sage` records load as indigo, blue and green, the hues they were shown with. Scanned schedules get one colour per course.
+- Downloader's link row shows the detected service's brand mark (YouTube, Instagram, Facebook, X, TikTok; a globe otherwise). An empty field offers Pegar, which pastes and analyses at once. Before any download the screen lists the supported services; afterwards `Recientes` lists saved files, which can be shared again or deleted from the phone.
+- Analysis shows a playable preview (or the thumbnail when `Ahorro de datos` is on or the stream fails), title, author and duration, an item picker for carousels and playlists, and the formats the service allows: Video, Audio and Foto. Quality appears only for video that the service can re-encode.
+- Downloads run as jobs on the local service. The bar is determinate while the PC downloads and while the file copies to the iPhone, becomes a spinner while FFmpeg processes, and can be cancelled.
+- Ajustes holds Tema, Downloader (Ahorro de datos) and the Gemini key.
+
 ## Product
 
 My SuperApp is a quiet personal home for small, focused tools. The shipped tools are Horario, a weekly planner for seeing and editing recurring classes or commitments, and Downloader, a compact client for the local yt-dlp service.

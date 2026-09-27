@@ -27,4 +27,13 @@ Si Expo Go abre la app pero Downloader no logra conectarse, permite el puerto so
 New-NetFirewallRule -DisplayName "My SuperApp Downloader LAN 8787" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8787 -RemoteAddress "192.168.101.0/24" -Profile Public
 ```
 
+Las descargas desde la app usan `POST /jobs`, `GET /jobs/{id}` para el progreso y `DELETE /jobs/{id}` para cancelar. `POST /download` sigue disponible de forma síncrona.
+
+Las publicaciones solo con fotos (Instagram, X, Facebook) se leen con gallery-dl cuando yt-dlp no encuentra video. Si un sitio pide iniciar sesión, puedes usar las cookies de un navegador de este PC:
+
+```powershell
+$env:DOWNLOADER_COOKIES_BROWSER="chrome"
+.\.venv\Scripts\python server.py
+```
+
 Para combinar video y audio en un MP4, yt-dlp puede requerir FFmpeg instalado y accesible en el PATH. El servicio está pensado para tu red local; no lo expongas a Internet sin autenticación.

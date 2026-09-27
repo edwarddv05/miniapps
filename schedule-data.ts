@@ -1,5 +1,17 @@
 export type DayIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6;
-export type ScheduleColor = 'slate' | 'coral' | 'sage';
+
+export const SCHEDULE_COLORS = ['red', 'orange', 'yellow', 'green', 'teal', 'blue', 'indigo', 'purple', 'pink', 'brown'] as const;
+export type ScheduleColor = typeof SCHEDULE_COLORS[number];
+
+// The first palette only had three keys. 'coral' was shown as blue, so each
+// legacy key maps to the hue people actually saw.
+const LEGACY_COLORS: Record<string, ScheduleColor> = { slate: 'indigo', coral: 'blue', sage: 'green' };
+
+export function normalizeScheduleColor(value: unknown): ScheduleColor | null {
+  if (typeof value !== 'string') return null;
+  if ((SCHEDULE_COLORS as readonly string[]).includes(value)) return value as ScheduleColor;
+  return LEGACY_COLORS[value] ?? null;
+}
 
 export type ScheduleEntry = {
   id: string;
@@ -41,10 +53,10 @@ export function parseSchedule(raw: string | null): ScheduleEntry[] {
       typeof item.start !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(item.start) ||
       typeof item.end !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(item.end) ||
       item.end <= item.start || typeof item.location !== 'string' ||
-      !['slate', 'coral', 'sage'].includes(item.color)) {
+      !normalizeScheduleColor(item.color)) {
       throw new Error('Invalid schedule entry');
     }
     ids.add(item.id);
   }
-  return value;
+  return value.map((item) => ({ ...item, color: normalizeScheduleColor(item.color) as ScheduleColor }));
 }

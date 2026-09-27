@@ -31,7 +31,8 @@
         {
           "photosPermission": "La app necesita acceso a tus fotos para escanear y generar tu horario automáticamente."
         }
-      ]
+      ],
+      "expo-video"
     ]
   }
 }

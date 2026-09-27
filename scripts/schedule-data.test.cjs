@@ -8,7 +8,7 @@ const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.Modu
 const moduleExports = {};
 new Function('exports', compiled)(moduleExports);
 const { formatScheduleTime, parseSchedule, todayAgenda } = moduleExports;
-const entry = { id: 'test', title: 'Clase de prueba', day: 0, start: '08:00', end: '09:00', location: '', color: 'slate' };
+const entry = { id: 'test', title: 'Clase de prueba', day: 0, start: '08:00', end: '09:00', location: '', color: 'teal' };
 
 test('missing and empty storage are valid empty schedules', () => {
   assert.deepEqual(parseSchedule(null), []);
@@ -24,6 +24,11 @@ test('schedule times use a readable AM and PM format', () => {
 
 test('existing valid records are preserved', () => {
   assert.deepEqual(parseSchedule(JSON.stringify([entry])), [entry]);
+});
+
+test('legacy three-colour records load with the hue they were shown with', () => {
+  const legacy = ['slate', 'coral', 'sage'].map((color, index) => ({ ...entry, id: `legacy-${index}`, color }));
+  assert.deepEqual(parseSchedule(JSON.stringify(legacy)).map((item) => item.color), ['indigo', 'blue', 'green']);
 });
 
 test('today agenda distinguishes upcoming, ongoing, and finished classes', () => {

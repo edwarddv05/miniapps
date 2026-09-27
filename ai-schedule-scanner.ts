@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
-import { type DayIndex, type ScheduleColor, type ScheduleEntry } from './schedule-data';
+import { SCHEDULE_COLORS, type DayIndex, type ScheduleColor, type ScheduleEntry } from './schedule-data';
 
 export const GEMINI_API_KEY_STORAGE = '@miniapps/gemini_api_key';
 
@@ -48,7 +48,7 @@ Reglas:
    6: Domingo
 3. Horas en formato exacto 24 horas "HH:MM" (ej. "08:00", "14:00", "18:00", "22:00").
 4. Si la misma materia tiene bloques consecutivos en el mismo día (por ejemplo de 18:00 a 20:00 Teoría y de 20:00 a 22:00 Práctica), puedes consolidarlo en un solo bloque "18:00" a "22:00" con el aula respectiva.
-5. Asigna un color distintivo entre: "slate", "coral", "sage".
+5. Usa siempre "color": "blue"; la app asigna los colores por curso.
 6. Devuelve ÚNICAMENTE un JSON válido (sin backticks de markdown, sin texto adicional) con este esquema exacto:
 [
   {
@@ -57,7 +57,7 @@ Reglas:
     "start": "16:00",
     "end": "18:00",
     "location": "S4-216",
-    "color": "coral"
+    "color": "blue"
   }
 ]
 `;
@@ -206,7 +206,14 @@ export async function scanScheduleFromImages(
         throw new Error('La respuesta no tiene el formato de lista esperado.');
       }
 
-      const validColors: ScheduleColor[] = ['slate', 'coral', 'sage'];
+      // One colour per course, so repeated sessions of a subject match and
+      // different subjects stay apart.
+      const courseColors = new Map<string, ScheduleColor>();
+      const colorFor = (title: string) => {
+        const key = title.toLocaleLowerCase('es');
+        if (!courseColors.has(key)) courseColors.set(key, SCHEDULE_COLORS[courseColors.size % SCHEDULE_COLORS.length]);
+        return courseColors.get(key) as ScheduleColor;
+      };
       const results: ScheduleEntry[] = [];
 
       for (let i = 0; i < parsedEntries.length; i++) {
@@ -220,10 +227,11 @@ export async function scanScheduleFromImages(
 
         const start = normalizeTime(String(item.start || '08:00'));
         const end = normalizeTime(String(item.end || '10:00'));
+        // A block that does not end after it starts would make the stored
+        // schedule fail validation on the next launch.
+        if (end <= start) continue;
         const location = item.location ? String(item.location).trim() : '';
-        const color: ScheduleColor = validColors.includes(item.color)
-          ? item.color
-          : validColors[i % validColors.length];
+        const color = colorFor(title);
 
         results.push({
           id: `scanned-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,

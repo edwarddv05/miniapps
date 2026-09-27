@@ -17,6 +17,7 @@ import {
   Image as NativeImage,
   Picker,
   ProgressView,
+  RNHostView,
   Section,
   SecureField,
   ScrollView,
@@ -25,6 +26,7 @@ import {
   Text as NativeText,
   TextField,
   type TextFieldRef,
+  Toggle,
   VStack,
   ZStack,
   useNativeState,
@@ -65,11 +67,34 @@ import {
 } from '@expo/ui/swift-ui/modifiers';
 import type { SFSymbol } from 'sf-symbols-typescript';
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AccessibilityInfo, Alert, Appearance, Platform, PlatformColor, useColorScheme, useWindowDimensions, type ColorValue } from 'react-native';
+import { AccessibilityInfo, Alert, Appearance, Image as RNImage, Platform, PlatformColor, StyleSheet, useColorScheme, useWindowDimensions, View, type ColorValue } from 'react-native';
+import FontAwesome6 from '@expo/vector-icons/FontAwesome6';
+import * as Clipboard from 'expo-clipboard';
+import { useEvent } from 'expo';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { formatScheduleTime, parseSchedule, todayAgenda, type DayIndex, type ScheduleColor, type ScheduleEntry } from './schedule-data';
 import { useCurrentTime } from './use-current-time';
 import { UI, type MiniappDestination } from './ui-structure';
-import { analyzeUrl, detectDownloadSource, downloadFromService, downloaderErrorMessage, formatDuration, saveDownload, type DownloadAnalysis, type DownloadMode, type DownloadSource } from './downloader-api';
+import {
+  analyzeUrl,
+  deleteLocalFile,
+  detectDownloadSource,
+  DownloadCancelledError,
+  downloaderErrorMessage,
+  fileExists,
+  formatDuration,
+  loadDownloadHistory,
+  saveDownloadHistory,
+  shareFile,
+  sourceForKey,
+  startDownload,
+  type DownloadAnalysis,
+  type DownloadHistoryItem,
+  type DownloadMode,
+  type DownloadProgress,
+  type DownloadTask,
+  type SourceKey,
+} from './downloader-api';
 import { StatusBar } from 'expo-status-bar';
 import { background, foregroundStyle, strokeBorder, tint } from './native-colors';
 import { getGeminiApiKey, setGeminiApiKey, pickImagesAndScan } from './ai-schedule-scanner';
@@ -99,6 +124,7 @@ type ThemeTokens = {
 
 const STORAGE_KEY = '@miniapps/schedule';
 const THEME_KEY = '@miniapps/theme';
+const DATA_SAVER_KEY = '@miniapps/data-saver';
 const SHEET_ACTION_INSET = UI.sheetActionInset;
 const CIRCLE_CONTROL_SIZE = UI.circleControlSize;
 // Keep the label box smaller than the outer control so SwiftUI's glass style
@@ -115,10 +141,19 @@ const DAYS: Array<{ initial: string; short: string; long: string; index: DayInde
   { initial: 'D', short: 'Dom', long: 'Domingo', index: 6 },
 ];
 
-const COLORS: Array<{ key: ScheduleColor; label: string }> = [
-  { key: 'slate', label: 'Azul pizarra' },
-  { key: 'coral', label: 'Azul' },
-  { key: 'sage', label: 'Salvia' },
+// System colours keep ten clearly different hues and adapt to dark mode and
+// Increase Contrast without hand-tuned variants.
+const COLORS: Array<{ key: ScheduleColor; label: string; color: ColorValue }> = [
+  { key: 'red', label: 'Rojo', color: PlatformColor('systemRed') },
+  { key: 'orange', label: 'Naranja', color: PlatformColor('systemOrange') },
+  { key: 'yellow', label: 'Amarillo', color: PlatformColor('systemYellow') },
+  { key: 'green', label: 'Verde', color: PlatformColor('systemGreen') },
+  { key: 'teal', label: 'Turquesa', color: PlatformColor('systemTeal') },
+  { key: 'blue', label: 'Azul', color: PlatformColor('systemBlue') },
+  { key: 'indigo', label: 'Índigo', color: PlatformColor('systemIndigo') },
+  { key: 'purple', label: 'Morado', color: PlatformColor('systemPurple') },
+  { key: 'pink', label: 'Rosa', color: PlatformColor('systemPink') },
+  { key: 'brown', label: 'Marrón', color: PlatformColor('systemBrown') },
 ];
 
 const LIGHT: ThemeTokens = {
@@ -226,10 +261,29 @@ function findConflict(entry: ScheduleEntry, others: ScheduleEntry[]) {
   return others.find((item) => item.id !== entry.id && item.day === entry.day && minutesFromTime(entry.start) < minutesFromTime(item.end) && minutesFromTime(entry.end) > minutesFromTime(item.start));
 }
 
-function colorForKey(key: ScheduleColor, tokens: ThemeTokens) {
-  if (key === 'coral') return { main: tokens.blue, soft: tokens.blueSoft };
-  if (key === 'sage') return { main: tokens.sage, soft: tokens.sageSoft };
-  return { main: tokens.slate, soft: tokens.slateSoft };
+function colorForKey(key: ScheduleColor) {
+  const match = COLORS.find((item) => item.key === key) ?? COLORS[5];
+  return { main: match.color, label: match.label };
+}
+
+function ColorSwatchesNative({ selection, tokens, onChange }: { selection: ScheduleColor; tokens: ThemeTokens; onChange: (color: ScheduleColor) => void }) {
+  const rows = [COLORS.slice(0, 5), COLORS.slice(5)];
+  return <VStack alignment="leading" spacing={10} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' }), padding({ vertical: 6 })]}>
+    <HStack alignment="firstTextBaseline" spacing={8}>
+      <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'subheadline', weight: 'semibold' })}>Color</NativeText>
+      <NativeText modifiers={textModifiers(tokens, { style: 'subheadline' })}>{colorForKey(selection).label}</NativeText>
+    </HStack>
+    {rows.map((row, index) => <HStack key={index} alignment="center" spacing={0} modifiers={[frame({ maxWidth: Infinity })]}>
+      {row.map((item) => {
+        const selected = item.key === selection;
+        return <NativeButton key={item.key} onPress={() => onChange(item.key)} modifiers={[buttonStyle('plain'), frame({ maxWidth: Infinity, minHeight: 44 }), accessibilityLabel(item.label), ...(selected ? [accessibilityAddTraits(['isSelected'])] : [])]}>
+          <ZStack alignment="center" modifiers={[frame({ width: 44, height: 44 }), contentShape(shapes.circle())]}>
+            <NativeImage systemName={selected ? 'checkmark.circle.fill' : 'circle.fill'} size={34} color={item.color} />
+          </ZStack>
+        </NativeButton>;
+      })}
+    </HStack>)}
+  </VStack>;
 }
 
 function textModifiers(tokens: ThemeTokens, options: { color?: ColorValue; style?: 'largeTitle' | 'title' | 'title2' | 'title3' | 'headline' | 'subheadline' | 'body' | 'callout' | 'footnote' | 'caption' | 'caption2'; weight?: 'regular' | 'medium' | 'semibold' | 'bold' } = {}): ViewModifier[] {
@@ -350,12 +404,6 @@ function SymbolImage({ name, color, size = 22 }: { name: SFSymbol; color: ColorV
   return <NativeImage systemName={name} modifiers={[font({ textStyle }), foregroundStyle(color), accessibilityHidden()]} />;
 }
 
-function SourceBadgeNative({ source, tokens }: { source: DownloadSource; tokens: ThemeTokens }) {
-  return <VStack alignment="center" spacing={0} modifiers={[frame({ width: 34, height: 34 }), background(tokens.slateSoft), clipShape('roundedRectangle', 10), accessibilityLabel(`Fuente ${source.label}`)]}>
-    <NativeText modifiers={[...textModifiers(tokens, { color: tokens.slate, style: source.shortLabel.length > 2 ? 'caption2' : 'body', weight: 'bold' }), accessibilityHidden()]}>{source.shortLabel}</NativeText>
-  </VStack>;
-}
-
 function DataStateNative({ loading, error, tokens, onRetry }: { loading: boolean; error: string | null; tokens: ThemeTokens; onRetry: () => void }) {
   return <VStack alignment="leading" spacing={12} modifiers={surfaceModifiers(tokens)}>
     {loading ? <ProgressView /> : <SymbolImage name="exclamationmark.triangle" color={tokens.danger} />}
@@ -463,119 +511,316 @@ function HomeNative({ entries, tokens, loading, error, onOpenSchedule, onRetry }
   );
 }
 
-function DownloaderNative({ tokens, onBack }: { tokens: ThemeTokens; onBack: () => void }) {
+const BRAND_ICONS: Record<Exclude<SourceKey, 'other'>, { glyph: string; background: string; foreground: string }> = {
+  youtube: { glyph: 'youtube', background: '#FF0033', foreground: '#FFFFFF' },
+  instagram: { glyph: 'instagram', background: '#E1306C', foreground: '#FFFFFF' },
+  facebook: { glyph: 'facebook', background: '#0866FF', foreground: '#FFFFFF' },
+  x: { glyph: 'x-twitter', background: '#000000', foreground: '#FFFFFF' },
+  tiktok: { glyph: 'tiktok', background: '#000000', foreground: '#FFFFFF' },
+};
+
+// Brand marks are not SF Symbols, so the glyph comes from Font Awesome's brand
+// set hosted as a small React Native view inside the SwiftUI row.
+function SourceIconNative({ source, tokens, size = 34 }: { source: SourceKey; tokens: ThemeTokens; size?: number }) {
+  const label = sourceForKey(source).label;
+  if (source === 'other') {
+    return <ZStack alignment="center" modifiers={[frame({ width: size, height: size }), background(tokens.slateSoft), clipShape('roundedRectangle', size * 0.28), accessibilityLabel(label)]}>
+      <NativeImage systemName="globe" size={size * 0.5} color={tokens.slate} />
+    </ZStack>;
+  }
+  const brand = BRAND_ICONS[source];
+  const dark = tokens.mode === 'dark' && brand.background === '#000000';
+  return <VStack modifiers={[frame({ width: size, height: size }), clipShape('roundedRectangle', size * 0.28), accessibilityLabel(label)]}>
+    <RNHostView>
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: dark ? '#FFFFFF' : brand.background }}>
+        <FontAwesome6 name={brand.glyph} brand size={Math.round(size * 0.55)} color={dark ? '#000000' : brand.foreground} />
+      </View>
+    </RNHostView>
+  </VStack>;
+}
+
+function PreviewVideo({ uri, poster, onError }: { uri: string; poster: string | null; onError: () => void }) {
+  const player = useVideoPlayer(uri, (instance) => {
+    instance.loop = false;
+  });
+  const { status } = useEvent(player, 'statusChange', { status: player.status });
+  useEffect(() => {
+    if (status === 'error') onError();
+  }, [status, onError]);
+  return <View style={{ flex: 1, backgroundColor: '#000000' }}>
+    {status !== 'readyToPlay' && poster ? <RNImage source={{ uri: poster }} style={StyleSheet.absoluteFill} resizeMode="cover" /> : null}
+    <VideoView player={player} style={StyleSheet.absoluteFill} nativeControls contentFit="contain" allowsPictureInPicture={false} />
+  </View>;
+}
+
+function MediaPreviewNative({ videoUrl, imageUrl, aspect, dataSaver, tokens }: { videoUrl: string | null; imageUrl: string | null; aspect: number | null; dataSaver: boolean; tokens: ThemeTokens }) {
+  const { width } = useWindowDimensions();
+  const [videoFailed, setVideoFailed] = useState(false);
+  const onError = useCallback(() => setVideoFailed(true), []);
+  useEffect(() => setVideoFailed(false), [videoUrl]);
+  const showVideo = Boolean(videoUrl) && !dataSaver && !videoFailed;
+  if (!showVideo && !imageUrl) return null;
+  const previewWidth = Math.min(width, UI.contentWidth) - UI.pageInset * 2;
+  const height = Math.round(Math.min(440, Math.max(180, previewWidth / (aspect ?? 16 / 9))));
+  return <VStack modifiers={[frame({ maxWidth: Infinity, minHeight: height, maxHeight: height }), background(tokens.surfaceRaised), accessibilityLabel(showVideo ? 'Vista previa del video' : 'Miniatura')]}>
+    <RNHostView>
+      {showVideo && videoUrl
+        ? <PreviewVideo key={videoUrl} uri={videoUrl} poster={imageUrl} onError={onError} />
+        : <RNImage source={{ uri: imageUrl ?? undefined }} style={{ flex: 1 }} resizeMode={aspect && aspect < 1 ? 'contain' : 'cover'} />}
+    </RNHostView>
+  </VStack>;
+}
+
+const MODE_LABELS: Record<DownloadMode, string> = { video: 'Video', audio: 'Audio', image: 'Foto' };
+const MODE_SYMBOLS: Record<DownloadMode, SFSymbol> = { video: 'film', audio: 'music.note', image: 'photo' };
+
+function progressLabel(progress: DownloadProgress | null) {
+  if (!progress) return 'Preparando…';
+  if (progress.stage === 'processing') return 'Procesando en el PC…';
+  if (progress.stage === 'transfer') return 'Guardando en el iPhone';
+  return 'Descargando en el PC';
+}
+
+function DownloaderNative({ tokens, dataSaver, onBack }: { tokens: ThemeTokens; dataSaver: boolean; onBack: () => void }) {
   const urlState = useNativeState('');
   const [url, setUrl] = useState('');
-  const [mode, setMode] = useState<DownloadMode>('video');
   const [phase, setPhase] = useState<'idle' | 'analyzing' | 'ready' | 'downloading'>('idle');
   const [analysis, setAnalysis] = useState<DownloadAnalysis | null>(null);
-  const [selectedVideoId, setSelectedVideoId] = useState('');
+  const [itemId, setItemId] = useState('');
+  const [mode, setMode] = useState<DownloadMode>('video');
   const [qualityHeight, setQualityHeight] = useState<number | null>(null);
+  const [progress, setProgress] = useState<DownloadProgress | null>(null);
   const [status, setStatus] = useState<{ kind: 'error' | 'success'; text: string } | null>(null);
+  const [history, setHistory] = useState<DownloadHistoryItem[]>([]);
+  const analyzeController = useRef<AbortController | null>(null);
+  const task = useRef<DownloadTask | null>(null);
   const source = detectDownloadSource(url);
-  const selectedVideo = analysis?.videos.find((video) => video.id === selectedVideoId);
+  const item = analysis?.items.find((candidate) => candidate.id === itemId) ?? null;
+  const itemModes: DownloadMode[] = item?.kind === 'image' ? ['image'] : item?.kind === 'video' && item.mediaUrl ? ['video'] : analysis?.modes ?? [];
+  const isBusy = phase === 'analyzing' || phase === 'downloading';
 
-  const updateUrl = (value: string) => {
+  useEffect(() => {
+    void loadDownloadHistory().then(setHistory);
+    return () => {
+      analyzeController.current?.abort();
+      task.current?.cancel();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (itemModes.length && !itemModes.includes(mode)) setMode(itemModes[0]);
+  }, [itemModes.join(','), mode]);
+
+  const reset = (value: string) => {
+    analyzeController.current?.abort();
     setUrl(value);
     urlState.set(value);
     setAnalysis(null);
-    setSelectedVideoId('');
+    setItemId('');
     setQualityHeight(null);
     setPhase('idle');
     setStatus(null);
   };
 
-  const analyze = async () => {
-    if (phase === 'analyzing' || phase === 'downloading' || !url.trim()) return;
+  const analyze = async (value = url) => {
+    if (phase === 'downloading' || !value.trim()) return;
+    analyzeController.current?.abort();
+    const controller = new AbortController();
+    analyzeController.current = controller;
     setPhase('analyzing');
     setStatus(null);
     try {
-      const result = await analyzeUrl(url);
+      const result = await analyzeUrl(value, controller.signal);
+      if (controller.signal.aborted) return;
       setAnalysis(result);
-      setSelectedVideoId(result.videos[0]?.id ?? '');
+      setItemId(result.items[0]?.id ?? '');
+      setMode(result.modes[0]);
       setQualityHeight(result.qualities[0]?.height ?? null);
       setPhase('ready');
     } catch (error) {
+      if (controller.signal.aborted) return;
       setAnalysis(null);
       setPhase('idle');
       setStatus({ kind: 'error', text: downloaderErrorMessage(error, 'No se pudo analizar el enlace.') });
     }
   };
 
+  const paste = async () => {
+    const text = (await Clipboard.getStringAsync()).trim();
+    if (!text) {
+      setStatus({ kind: 'error', text: 'El portapapeles está vacío.' });
+      return;
+    }
+    reset(text);
+    void analyze(text);
+  };
+
+  const rememberDownload = async (entry: DownloadHistoryItem) => {
+    const next = [entry, ...history];
+    const kept = next.slice(0, 20);
+    for (const dropped of next.slice(20)) await deleteLocalFile(dropped.uri);
+    setHistory(kept);
+    await saveDownloadHistory(kept).catch(() => undefined);
+  };
+
   const download = async () => {
-    if (phase !== 'ready' || !url.trim()) return;
+    if (phase !== 'ready' || !analysis) return;
     setPhase('downloading');
     setStatus(null);
+    setProgress(null);
+    const current = startDownload({
+      url: item?.url ?? url,
+      mode,
+      quality: mode === 'video' ? qualityHeight : null,
+      mediaUrl: mode === 'audio' ? null : item?.mediaUrl ?? analysis.mediaUrl,
+    }, setProgress);
+    task.current = current;
     try {
-      const result = await downloadFromService(selectedVideo?.url || url, mode, mode === 'video' ? qualityHeight : null);
-      await saveDownload(result);
-      setStatus({ kind: 'success', text: 'Listo.' });
+      const { result, uri } = await current.promise;
+      await rememberDownload({
+        id: makeId(),
+        title: item && analysis.items.length > 1 ? `${analysis.title} · ${item.title}` : analysis.title,
+        source: source?.key ?? 'other',
+        mode,
+        filename: result.filename,
+        mimeType: result.mimeType,
+        uri,
+        thumbnail: item?.thumbnail ?? analysis.thumbnail,
+        createdAt: Date.now(),
+      });
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setStatus({ kind: 'success', text: `${MODE_LABELS[mode]} guardado.` });
       setPhase('ready');
+      await shareFile(uri, result.mimeType, result.filename);
     } catch (error) {
       setPhase('ready');
-      setStatus({ kind: 'error', text: downloaderErrorMessage(error, 'No se pudo completar la descarga.') });
+      if (!(error instanceof DownloadCancelledError)) setStatus({ kind: 'error', text: downloaderErrorMessage(error, 'No se pudo completar la descarga.') });
+    } finally {
+      task.current = null;
+      setProgress(null);
     }
   };
 
-  const isBusy = phase === 'analyzing' || phase === 'downloading';
-  const actionLabel = phase === 'analyzing' ? 'Analizando…' : phase === 'downloading' ? 'Descargando…' : phase === 'ready' ? 'Descargar' : 'Analizar';
-  const videoCountLabel = analysis ? `${analysis.videoCount} ${analysis.videoCount === 1 ? 'video disponible' : 'videos disponibles'}` : null;
+  const openHistory = async (entry: DownloadHistoryItem) => {
+    if (!(await fileExists(entry.uri))) {
+      setStatus({ kind: 'error', text: 'El archivo ya no está en el iPhone.' });
+      return removeHistory(entry);
+    }
+    await shareFile(entry.uri, entry.mimeType, entry.filename);
+  };
+
+  const removeHistory = async (entry: DownloadHistoryItem) => {
+    await deleteLocalFile(entry.uri);
+    const kept = history.filter((candidate) => candidate.id !== entry.id);
+    setHistory(kept);
+    await saveDownloadHistory(kept).catch(() => undefined);
+  };
+
+  const previewVideo = item ? (item.kind === 'video' ? item.mediaUrl : null) : analysis?.previewUrl ?? null;
+  const previewImage = item?.thumbnail ?? analysis?.thumbnail ?? null;
+  const percent = progress?.fraction != null ? Math.round(progress.fraction * 100) : null;
+  const details = analysis ? [analysis.uploader, formatDuration(item?.durationSeconds ?? analysis.durationSeconds)].filter(Boolean).join(' · ') : '';
 
   return (
     <PageNative title="Downloader" tokens={tokens} onBack={onBack}>
       <Form modifiers={groupedListModifiers(tokens)}>
         <Section title="Enlace">
-          <HStack alignment="center" spacing={8} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' })]}>
-            {source ? <SourceBadgeNative source={source} tokens={tokens} /> : null}
-            <TextField text={urlState} onTextChange={updateUrl} placeholder="https://…" modifiers={[frame({ maxWidth: Infinity }), font({ textStyle: 'body' }), textFieldStyle('plain'), keyboardType('url'), textInputAutocapitalization('never'), autocorrectionDisabled(), disabled(isBusy), accessibilityLabel('Enlace del audio o video'), submitLabel('go'), onSubmit(() => { if (phase === 'idle') void analyze(); })]} />
-            {!analysis ? <NativeCircleButton tokens={tokens} accent label="Analizar enlace" systemName="arrow.up" onPress={() => void analyze()} disabled={isBusy || !url.trim()} /> : null}
+          <HStack alignment="center" spacing={10} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' }), padding({ vertical: 2 })]}>
+            {source ? <SourceIconNative source={source.key} tokens={tokens} /> : <SymbolImage name="link" color={tokens.secondary} size={18} />}
+            <TextField text={urlState} onTextChange={reset} placeholder="Pega un enlace" modifiers={[frame({ maxWidth: Infinity }), font({ textStyle: 'body' }), textFieldStyle('plain'), keyboardType('url'), textInputAutocapitalization('never'), autocorrectionDisabled(), disabled(phase === 'downloading'), accessibilityLabel('Enlace del contenido'), submitLabel('go'), onSubmit(() => void analyze())]} />
+            {!url.trim()
+              ? <NativeCircleButton tokens={tokens} label="Pegar enlace" systemName="doc.on.clipboard" onPress={() => void paste()} />
+              : analysis
+                ? <NativeCircleButton tokens={tokens} label="Borrar enlace" systemName="xmark" onPress={() => reset('')} disabled={phase === 'downloading'} />
+                : <NativeCircleButton tokens={tokens} accent label="Analizar enlace" systemName="arrow.up" onPress={() => void analyze()} busy={phase === 'analyzing'} />}
           </HStack>
-          {isBusy ? <VStack alignment="center" spacing={6} modifiers={[frame({ maxWidth: Infinity, alignment: 'center' }), padding({ vertical: 8 })]}>
-            <ProgressView />
-            <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'subheadline' })}>{actionLabel}</NativeText>
-          </VStack> : null}
+          {phase === 'analyzing' ? <HStack alignment="center" spacing={10} modifiers={[padding({ vertical: 4 })]}>
+            <ProgressView modifiers={[controlSize('small')]} />
+            <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'subheadline' })}>Analizando enlace…</NativeText>
+          </HStack> : null}
         </Section>
+
+        {status?.kind === 'error' ? <Section>
+          <HStack alignment="firstTextBaseline" spacing={8}>
+            <SymbolImage name="exclamationmark.circle.fill" color={tokens.danger} size={18} />
+            <NativeText modifiers={textModifiers(tokens, { color: tokens.danger, style: 'callout', weight: 'medium' })}>{status.text}</NativeText>
+          </HStack>
+        </Section> : null}
+
         {analysis ? <>
-          <Section title="Contenido">
-            <VStack alignment="leading" spacing={8} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' }), padding({ vertical: 8 })]}>
-              <NativeText modifiers={textModifiers(tokens, { style: 'title2', weight: 'bold' })}>{analysis.title}</NativeText>
-              {analysis.uploader ? <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'subheadline' })}>Usuario: {analysis.uploader}</NativeText> : null}
-              {formatDuration(analysis.durationSeconds) ? <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'subheadline' })}>Duración: {formatDuration(analysis.durationSeconds)}</NativeText> : null}
-              {analysis.description ? <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'body' })}>{analysis.description}</NativeText> : null}
+          <Section>
+            <MediaPreviewNative videoUrl={previewVideo} imageUrl={previewImage} aspect={analysis.aspectRatio} dataSaver={dataSaver} tokens={tokens} />
+            <VStack alignment="leading" spacing={4} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' }), padding({ vertical: 6 })]}>
+              <NativeText modifiers={[...textModifiers(tokens, { style: 'headline', weight: 'semibold' }), lineLimit(3)]}>{analysis.title}</NativeText>
+              {details ? <NativeText modifiers={[...textModifiers(tokens, { color: tokens.secondary, style: 'subheadline' }), monospacedDigit()]}>{details}</NativeText> : null}
             </VStack>
           </Section>
-          {analysis.videos.length > 1 ? <Section title="Videos">
-            {videoCountLabel ? <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'subheadline' })}>{videoCountLabel}</NativeText> : null}
-            {analysis.videos.length > 1 ? <Picker label="Video" selection={selectedVideoId} onSelectionChange={(value) => setSelectedVideoId(String(value))} modifiers={[pickerStyle('menu'), disabled(isBusy), accessibilityLabel('Video')]}>
-              {analysis.videos.map((video) => <NativeText key={video.id} modifiers={[tag(video.id)]}>{video.title}</NativeText>)}
-            </Picker> : null}
+
+          {analysis.items.length > 1 ? <Section>
+            <Picker label={`${analysis.items.length} elementos`} selection={itemId} onSelectionChange={(value) => { setItemId(String(value)); setStatus(null); }} modifiers={[pickerStyle('menu'), disabled(isBusy)]}>
+              {analysis.items.map((candidate) => <NativeText key={candidate.id} modifiers={[tag(candidate.id)]}>{candidate.title}</NativeText>)}
+            </Picker>
           </Section> : null}
+
           <Section title="Formato">
-            <Picker selection={mode} onSelectionChange={(value) => { setMode(value as DownloadMode); setStatus(null); }} modifiers={[pickerStyle('segmented'), frame({ maxWidth: Infinity }), disabled(isBusy), accessibilityLabel('Formato')]}>
-              <NativeText modifiers={[tag('video')]}>Video</NativeText>
-              <NativeText modifiers={[tag('audio')]}>Audio</NativeText>
-            </Picker>
+            {itemModes.length > 1 ? <Picker selection={mode} onSelectionChange={(value) => { setMode(value as DownloadMode); setStatus(null); }} modifiers={[pickerStyle('segmented'), frame({ maxWidth: Infinity }), disabled(isBusy), accessibilityLabel('Formato')]}>
+              {itemModes.map((option) => <NativeText key={option} modifiers={[tag(option)]}>{MODE_LABELS[option]}</NativeText>)}
+            </Picker> : <HStack spacing={10}>
+              <SymbolImage name={MODE_SYMBOLS[mode]} color={tokens.secondary} size={18} />
+              <NativeText modifiers={textModifiers(tokens)}>{MODE_LABELS[mode]}</NativeText>
+            </HStack>}
+            {mode === 'video' && !item?.mediaUrl && !analysis.mediaUrl && analysis.qualities.length > 0 ? (
+              <Picker label="Calidad" selection={qualityHeight ?? analysis.qualities[0].height} onSelectionChange={(value) => setQualityHeight(Number(value))} modifiers={[pickerStyle('menu'), disabled(isBusy)]}>
+                {analysis.qualities.map((quality) => <NativeText key={quality.id} modifiers={[tag(quality.height)]}>{quality.label}</NativeText>)}
+              </Picker>
+            ) : null}
           </Section>
-          {mode === 'video' && analysis.qualities.length > 0 ? <Section title="Calidad">
-            <Picker label="Calidad" selection={qualityHeight ?? analysis.qualities[0].height} onSelectionChange={(value) => setQualityHeight(Number(value))} modifiers={[pickerStyle('menu'), disabled(isBusy), accessibilityLabel('Calidad')]}>
-              {analysis.qualities.map((quality) => <NativeText key={quality.id} modifiers={[tag(quality.height)]}>{quality.label}</NativeText>)}
-            </Picker>
-          </Section> : null}
+
           <Section>
-            <HStack alignment="center" spacing={16} modifiers={[padding({ vertical: 8 })]}>
-              <VStack alignment="leading" spacing={4} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' })]}>
-                <NativeText modifiers={textModifiers(tokens, { style: 'headline', weight: 'semibold' })}>{mode === 'audio' ? 'Guardar audio' : 'Guardar video'}</NativeText>
-              </VStack>
-              <NativeCircleButton tokens={tokens} accent label="Descargar" systemName="arrow.down" onPress={() => void download()} disabled={isBusy} />
-            </HStack>
+            {phase === 'downloading' ? <VStack alignment="leading" spacing={10} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' }), padding({ vertical: 6 })]}>
+              <HStack alignment="center" spacing={10}>
+                {percent == null ? <ProgressView modifiers={[controlSize('small')]} /> : null}
+                <NativeText modifiers={textModifiers(tokens, { style: 'subheadline', weight: 'medium' })}>{progressLabel(progress)}</NativeText>
+                <Spacer />
+                {percent != null ? <NativeText modifiers={[...textModifiers(tokens, { color: tokens.secondary, style: 'subheadline' }), monospacedDigit()]}>{`${percent} %`}</NativeText> : null}
+                <NativeCircleButton tokens={tokens} label="Cancelar descarga" systemName="xmark" onPress={() => task.current?.cancel()} />
+              </HStack>
+              {percent != null ? <ProgressView value={progress?.fraction ?? 0} modifiers={[tint(tokens.blue), accessibilityLabel(progressLabel(progress)), accessibilityValue(`${percent} %`)]} /> : null}
+            </VStack> : <NativeButton label={`Descargar ${MODE_LABELS[mode].toLowerCase()}`} systemImage="arrow.down.circle.fill" onPress={() => void download()} modifiers={[...nativeGlassModifiers(tokens, true), frame({ maxWidth: Infinity }), disabled(phase !== 'ready')]} />}
+            {status?.kind === 'success' ? <HStack alignment="firstTextBaseline" spacing={8}>
+              <SymbolImage name="checkmark.circle.fill" color={tokens.blue} size={18} />
+              <NativeText modifiers={textModifiers(tokens, { color: tokens.blue, style: 'callout', weight: 'medium' })}>{status.text}</NativeText>
+            </HStack> : null}
           </Section>
         </> : null}
-        {status ? (
-          <HStack alignment="top" spacing={7} modifiers={[padding({ horizontal: 4 })]}>
-            <SymbolImage name={status.kind === 'error' ? 'exclamationmark.circle' : 'checkmark.circle'} color={status.kind === 'error' ? tokens.danger : tokens.blue} size={18} />
-            <NativeText modifiers={textModifiers(tokens, { color: status.kind === 'error' ? tokens.danger : tokens.blue, style: 'callout', weight: 'semibold' })}>{status.text}</NativeText>
+
+        {history.length ? <Section title="Recientes">
+          {history.map((entry) => <ContextMenu key={entry.id}>
+            <ContextMenu.Trigger>
+              <NativeButton onPress={() => void openHistory(entry)} modifiers={[buttonStyle('plain'), accessibilityLabel(`${entry.title}, ${MODE_LABELS[entry.mode]}`)]}>
+                <HStack alignment="center" spacing={12} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' }), padding({ vertical: 4 }), contentShape(shapes.rectangle())]}>
+                  <SourceIconNative source={entry.source} tokens={tokens} size={32} />
+                  <VStack alignment="leading" spacing={2} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' })]}>
+                    <NativeText modifiers={[...textModifiers(tokens, { style: 'body' }), lineLimit(1)]}>{entry.title}</NativeText>
+                    <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'footnote' })}>{`${MODE_LABELS[entry.mode]} · ${new Intl.DateTimeFormat('es-PE', { day: 'numeric', month: 'short' }).format(entry.createdAt)}`}</NativeText>
+                  </VStack>
+                  <SymbolImage name="square.and.arrow.up" color={tokens.secondary} size={17} />
+                </HStack>
+              </NativeButton>
+            </ContextMenu.Trigger>
+            <ContextMenu.Items>
+              <NativeButton label="Compartir" systemImage="square.and.arrow.up" onPress={() => void openHistory(entry)} />
+              <NativeButton label="Eliminar del iPhone" systemImage="trash" role="destructive" onPress={() => void removeHistory(entry)} />
+            </ContextMenu.Items>
+          </ContextMenu>)}
+        </Section> : !analysis && phase !== 'analyzing' ? <Section title="Compatibles">
+          <HStack alignment="center" spacing={0} modifiers={[frame({ maxWidth: Infinity }), padding({ vertical: 6 })]}>
+            {(['youtube', 'instagram', 'facebook', 'x', 'tiktok'] as const).map((key) => <VStack key={key} alignment="center" spacing={6} modifiers={[frame({ maxWidth: Infinity })]}>
+              <SourceIconNative source={key} tokens={tokens} size={40} />
+              <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'caption' })}>{sourceForKey(key).label}</NativeText>
+            </VStack>)}
           </HStack>
-        ) : null}
+        </Section> : null}
       </Form>
     </PageNative>
   );
@@ -648,7 +893,7 @@ function MiniappsTabNative({ entries, tokens, loading, error, destination, sched
   );
 }
 
-function SettingsNative({ themeMode, tokens, onThemeChange, apiKey, onApiKeyChange }: { themeMode: ThemeMode; tokens: ThemeTokens; onThemeChange: (mode: ThemeMode) => void; apiKey: string; onApiKeyChange: (key: string) => void }) {
+function SettingsNative({ themeMode, tokens, onThemeChange, apiKey, onApiKeyChange, dataSaver, onDataSaverChange }: { themeMode: ThemeMode; tokens: ThemeTokens; onThemeChange: (mode: ThemeMode) => void; apiKey: string; onApiKeyChange: (key: string) => void; dataSaver: boolean; onDataSaverChange: (value: boolean) => void }) {
   const labels: Record<ThemeMode, string> = { system: 'Sistema', light: 'Claro', dark: 'Oscuro' };
   const keyState = useNativeState('');
   const [draft, setDraft] = useState('');
@@ -698,6 +943,9 @@ function SettingsNative({ themeMode, tokens, onThemeChange, apiKey, onApiKeyChan
           <Picker selection={themeMode} onSelectionChange={(value) => onThemeChange(value as ThemeMode)} modifiers={[pickerStyle('inline'), accessibilityLabel('Tema')]}>
             {(Object.keys(labels) as ThemeMode[]).map((mode) => <HStack key={mode} spacing={12} modifiers={[tag(mode), padding({ vertical: 8 })]}><SymbolImage name={mode === 'system' ? 'iphone' : mode === 'light' ? 'sun.max' : 'moon'} color={tokens.secondary} /><NativeText modifiers={textModifiers(tokens)}>{labels[mode]}</NativeText></HStack>)}
           </Picker>
+        </Section>
+        <Section title="Downloader">
+          <Toggle label="Ahorro de datos" systemImage="antenna.radiowaves.left.and.right.slash" isOn={dataSaver} onIsOnChange={onDataSaverChange} modifiers={[tint(tokens.blue)]} />
         </Section>
         <Section title="API de Gemini">
           {!editing ? <>
@@ -866,7 +1114,7 @@ function ScheduleEntryRowNative({ entry, tokens, state, onPress }: { entry: Sche
 }
 
 function AgendaContentNative({ entry, tokens, state }: { entry: ScheduleEntry; tokens: ThemeTokens; state?: AgendaState }) {
-  const entryColor = colorForKey(entry.color, tokens);
+  const entryColor = colorForKey(entry.color);
   const past = state === 'past';
   return <AdaptiveRow modifiers={[frame({ maxWidth: Infinity, minHeight: 64, alignment: 'leading' }), padding({ vertical: 10 }), contentShape(shapes.rectangle())]}>
         <VStack alignment="leading" spacing={3}>
@@ -977,7 +1225,7 @@ function ScheduleNative({ entries, tokens, selectedDay, onCreate, onScanAI, isSc
 }
 
 function ScheduleEditorNative({ entry, defaultDay, tokens, onSave, onDelete, onClose }: { entry: ScheduleEntry | null; defaultDay: DayIndex; tokens: ThemeTokens; onSave: (entry: ScheduleEntry) => Promise<string | null>; onDelete: (id: string) => void; onClose: () => void }) {
-  const [initial] = useState(() => entry ?? { id: makeId(), title: '', day: defaultDay, start: '08:00', end: '09:00', location: '', color: 'slate' as ScheduleColor });
+  const [initial] = useState(() => entry ?? { id: makeId(), title: '', day: defaultDay, start: '08:00', end: '09:00', location: '', color: 'blue' as ScheduleColor });
   const [title, setTitle] = useState(initial.title);
   const [day, setDay] = useState<DayIndex>(initial.day);
   const [start, setStart] = useState(initial.start);
@@ -1064,9 +1312,7 @@ function ScheduleEditorNative({ entry, defaultDay, tokens, onSave, onDelete, onC
           <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'subheadline', weight: 'semibold' })}>Lugar</NativeText>
           <TextField ref={locationInput} text={locationState} onTextChange={(value) => { setLocation(value); locationState.set(value); }} placeholder="Opcional" modifiers={[font({ textStyle: 'body' }), textFieldStyle('plain'), accessibilityLabel('Lugar, opcional'), submitLabel('done'), onSubmit(() => { void locationInput.current?.blur(); })]} />
         </VStack>
-        <Picker label="Color" selection={color} onSelectionChange={(value) => setColor(value as ScheduleColor)} modifiers={[pickerStyle('menu'), font({ textStyle: 'body', weight: 'semibold' })]}>
-          {COLORS.map((item) => <NativeText key={item.key} modifiers={[tag(item.key)]}>{item.label}</NativeText>)}
-        </Picker>
+        <ColorSwatchesNative selection={color} tokens={tokens} onChange={setColor} />
       </Section>
 
       {entry ? (
@@ -1105,6 +1351,7 @@ export default function App() {
   const [aiScanning, setAiScanning] = useState(false);
   const [scannedSchedule, setScannedSchedule] = useState<ScheduleEntry[] | null>(null);
   const [apiKeySheetVisible, setApiKeySheetVisible] = useState(false);
+  const [dataSaver, setDataSaver] = useState(false);
   const writePending = useRef(false);
   const ready = !loading && !storageError;
   const tokens = useMemo(() => getTokens(themeMode, systemScheme), [themeMode, systemScheme]);
@@ -1118,11 +1365,13 @@ export default function App() {
     setLoading(true);
     setStorageError(null);
     try {
-      const [storedSchedule, storedTheme, storedApiKey] = await Promise.all([
+      const [storedSchedule, storedTheme, storedApiKey, storedDataSaver] = await Promise.all([
         AsyncStorage.getItem(STORAGE_KEY),
         AsyncStorage.getItem(THEME_KEY),
         getGeminiApiKey(),
+        AsyncStorage.getItem(DATA_SAVER_KEY),
       ]);
+      setDataSaver(storedDataSaver === 'true');
       const parsed = parseSchedule(storedSchedule);
       const cleaned = parsed.filter((e) => !e.id.startsWith('example-'));
       if (cleaned.length !== parsed.length) {
@@ -1266,6 +1515,11 @@ export default function App() {
     ]);
   };
 
+  const changeDataSaver = (value: boolean) => {
+    setDataSaver(value);
+    void AsyncStorage.setItem(DATA_SAVER_KEY, String(value)).catch(() => Alert.alert('No se pudo guardar el ajuste', 'Ahorro de datos está aplicado solo hasta cerrar la app.'));
+  };
+
   const changeTheme = (mode: ThemeMode) => {
     setThemeMode(mode);
     void AsyncStorage.setItem(THEME_KEY, mode).catch(() => Alert.alert('No se pudo guardar el tema', 'El tema está aplicado. Vuelve a seleccionarlo para intentar guardarlo.'));
@@ -1288,12 +1542,12 @@ export default function App() {
       setView={setScheduleView}
     />
   );
-  const downloader = <DownloaderNative tokens={tokens} onBack={() => setDestination('library')} />;
+  const downloader = <DownloaderNative tokens={tokens} dataSaver={dataSaver} onBack={() => setDestination('library')} />;
   const body = (
     <TabView selection={screen} onSelectionChange={(value) => setScreen(value as Screen)} modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity }), tint(tokens.blue)]}>
       <TabView.Tab value="home" label="Inicio" systemImage="house.fill"><HomeTabNative entries={entries} tokens={tokens} loading={loading} error={storageError} onOpenSchedule={() => openSchedule(currentDayIndex())} onRetry={loadData} /></TabView.Tab>
       <TabView.Tab value="miniapps" label="Miniapps" systemImage="square.grid.2x2.fill"><MiniappsTabNative entries={entries} tokens={tokens} loading={loading} error={storageError} destination={destination} schedule={schedule} downloader={downloader} onOpenSchedule={() => openSchedule()} onOpenDownloader={openDownloader} onClearSchedule={clearSchedule} /></TabView.Tab>
-      <TabView.Tab value="settings" label="Ajustes" systemImage="gearshape.fill"><SettingsNative themeMode={themeMode} tokens={tokens} onThemeChange={changeTheme} apiKey={apiKey} onApiKeyChange={updateApiKey} /></TabView.Tab>
+      <TabView.Tab value="settings" label="Ajustes" systemImage="gearshape.fill"><SettingsNative themeMode={themeMode} tokens={tokens} onThemeChange={changeTheme} apiKey={apiKey} onApiKeyChange={updateApiKey} dataSaver={dataSaver} onDataSaverChange={changeDataSaver} /></TabView.Tab>
     </TabView>
   );
 

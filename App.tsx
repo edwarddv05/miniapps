@@ -5,7 +5,7 @@ import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from 'ex
 import * as Haptics from 'expo-haptics';
 import { StatusBar } from 'expo-status-bar';
 import { ComponentProps, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { formatScheduleTime, parseSchedule, todayAgenda, type ScheduleEntry } from './schedule-data';
+import { formatScheduleTime, parseSchedule, todayAgenda, type ScheduleColor, type ScheduleEntry } from './schedule-data';
 import { getGeminiApiKey, pickImagesAndScan, setGeminiApiKey } from './ai-schedule-scanner';
 import { useCurrentTime } from './use-current-time';
 import { UI, type MiniappDestination } from './ui-structure';
@@ -50,7 +50,6 @@ type ThemeMode = 'system' | 'light' | 'dark';
 type Screen = 'home' | 'miniapps' | 'settings';
 type ScheduleView = 'day' | 'week';
 type DayIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6;
-type ScheduleColor = 'slate' | 'coral' | 'sage';
 
 type ThemeTokens = {
   mode: 'light' | 'dark';
@@ -87,10 +86,18 @@ const DAYS: Array<{ short: string; long: string; index: DayIndex }> = [
   { short: 'Dom', long: 'Domingo', index: 6 },
 ];
 
-const COLORS: Array<{ key: ScheduleColor; label: string }> = [
-  { key: 'slate', label: 'Azul pizarra' },
-  { key: 'coral', label: 'Azul' },
-  { key: 'sage', label: 'Salvia' },
+// iOS system colour values (light, dark) so the preview matches the native palette.
+const COLORS: Array<{ key: ScheduleColor; label: string; light: string; dark: string }> = [
+  { key: 'red', label: 'Rojo', light: '#FF3B30', dark: '#FF453A' },
+  { key: 'orange', label: 'Naranja', light: '#FF9500', dark: '#FF9F0A' },
+  { key: 'yellow', label: 'Amarillo', light: '#FFCC00', dark: '#FFD60A' },
+  { key: 'green', label: 'Verde', light: '#34C759', dark: '#30D158' },
+  { key: 'teal', label: 'Turquesa', light: '#30B0C7', dark: '#40CBE0' },
+  { key: 'blue', label: 'Azul', light: '#007AFF', dark: '#0A84FF' },
+  { key: 'indigo', label: 'Índigo', light: '#5856D6', dark: '#5E5CE6' },
+  { key: 'purple', label: 'Morado', light: '#AF52DE', dark: '#BF5AF2' },
+  { key: 'pink', label: 'Rosa', light: '#FF2D55', dark: '#FF375F' },
+  { key: 'brown', label: 'Marrón', light: '#A2845E', dark: '#AC8E68' },
 ];
 
 const LIGHT: ThemeTokens = {
@@ -983,7 +990,7 @@ function ScheduleEditor({ visible, entry, defaultDay, tokens, onClose, onSave, o
   const [start, setStart] = useState('08:00');
   const [end, setEnd] = useState('09:00');
   const [location, setLocation] = useState('');
-  const [color, setColor] = useState<ScheduleColor>('slate');
+  const [color, setColor] = useState<ScheduleColor>('blue');
   const [validationError, setValidationError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
@@ -993,7 +1000,7 @@ function ScheduleEditor({ visible, entry, defaultDay, tokens, onClose, onSave, o
     const listener = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion);
     return () => listener.remove();
   }, []);
-  const dirty = title !== (entry?.title ?? '') || day !== (entry?.day ?? defaultDay) || start !== (entry?.start ?? '08:00') || end !== (entry?.end ?? '09:00') || location !== (entry?.location ?? '') || color !== (entry?.color ?? 'slate');
+  const dirty = title !== (entry?.title ?? '') || day !== (entry?.day ?? defaultDay) || start !== (entry?.start ?? '08:00') || end !== (entry?.end ?? '09:00') || location !== (entry?.location ?? '') || color !== (entry?.color ?? 'blue');
   const requestClose = () => {
     if (savingRef.current) return;
     if (!dirty) return onClose();
@@ -1007,7 +1014,7 @@ function ScheduleEditor({ visible, entry, defaultDay, tokens, onClose, onSave, o
     setStart(entry?.start ?? '08:00');
     setEnd(entry?.end ?? '09:00');
     setLocation(entry?.location ?? '');
-    setColor(entry?.color ?? 'slate');
+    setColor(entry?.color ?? 'blue');
     setValidationError(null);
     setSaving(false);
   }, [visible, entry, defaultDay]);
@@ -1546,9 +1553,9 @@ export default function App() {
 }
 
 function colorForKey(key: ScheduleColor, tokens: ThemeTokens) {
-  if (key === 'coral') return { main: tokens.blue, soft: tokens.blueSoft, border: tokens.blue };
-  if (key === 'sage') return { main: tokens.sage, soft: tokens.sageSoft, border: tokens.sage };
-  return { main: tokens.slate, soft: tokens.slateSoft, border: tokens.slate };
+  const match = COLORS.find((item) => item.key === key) ?? COLORS[5];
+  const main = tokens.mode === 'dark' ? match.dark : match.light;
+  return { main, soft: `${main}26`, border: main };
 }
 
 function colorForEntry(entry: ScheduleEntry, tokens: ThemeTokens) {
@@ -1699,7 +1706,7 @@ const styles = StyleSheet.create({
   timeFieldsRow: { flexDirection: 'row', gap: 16 },
   timeFieldsRowStacked: { flexDirection: 'column' },
   timeField: { flex: 1, minWidth: 0 },
-  colorOptions: { gap: 8 },
+  colorOptions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   colorOption: { minHeight: 48, borderWidth: 1, borderRadius: 15, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center' },
   colorSwatch: { width: 18, height: 18, borderRadius: 9, marginRight: 9 },
   colorOptionText: { fontSize: 14, fontWeight: '600' },
