@@ -103,7 +103,8 @@ The app's colour comes from its content, not from chrome. This section supersede
 
 - The .ipa for AltStore/SideStore embeds Python with yt-dlp and gallery-dl (`modules/superapp-native`). YouTube's JavaScript challenges run in JavaScriptCore; separate video and audio are joined with AVFoundation, never re-encoded. Formats AVFoundation cannot keep (VP9, AV1) are not offered.
 - Downloader appears in the share sheet. Sharing a link opens the app on Downloader and downloads it with the default format and quality; the result opens in the share sheet as a manual download does.
-- The Horario widget (small, medium, lock screen rectangular and inline) shows the current or next class title first, then time and Aula, with the class colour as a dot. After the last class it says the day is done and shows the next day's first class. Tapping it opens Horario.
+- The Horario widget (small, medium, large, lock screen rectangular, circular and inline) leads with the current or next class: title, then code · section · kind, Aula and time left, with the class colour as tint and progress. Large lays the day out as a timeline with a line at the current minute. After the last class it shows the next day's first class. Tapping it opens Horario.
+- Motion is drawn in SwiftUI (`modules/superapp-native/ios/AnimationViews.swift`) and always follows something real: Hoy's sky places the sun or moon at the current time and scrubs through the day with a sideways drag; the download bar fills as liquid at the real percentage; a recognised platform pops into the link field; a free day in Horario shows a steaming cup that leans with the finger; pulling Mi lista in Anime stretches a drop that snaps into a refresh. Expo Go keeps the static versions.
 
 ## Product
 

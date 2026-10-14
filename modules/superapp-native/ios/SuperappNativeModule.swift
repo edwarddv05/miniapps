@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreImage
 import ExpoModulesCore
+import ExpoUI
 import WidgetKit
 
 public class SuperappNativeModule: Module {
@@ -32,6 +33,13 @@ public class SuperappNativeModule: Module {
       SharedStore.defaults?.set(json, forKey: SharedStore.scheduleKey)
       WidgetCenter.shared.reloadAllTimelines()
     }
+
+    // Animated SwiftUI views for @expo/ui trees (AnimationViews.swift).
+    ExpoUIView(PopInView.self)
+    ExpoUIView(LiquidProgressView.self)
+    ExpoUIView(SkyView.self)
+    ExpoUIView(SteamCupView.self)
+    ExpoUIView(PullRefreshView.self)
   }
 }
 

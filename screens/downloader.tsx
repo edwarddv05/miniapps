@@ -14,6 +14,7 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { UI } from '../ui-structure';
 import { analyzeUrl, checkDownloader, LOCAL_DOWNLOADER, downloaderUrl, loadDownloaderUrl, normalizeServerUrl, saveDownloaderUrl, deleteLocalFile, detectDownloadSource, DownloadCancelledError, downloaderErrorMessage, fileExists, formatDuration, loadDownloadHistory, saveDownloadHistory, shareFile, sourceForKey, startDownload, type DownloadAnalysis, type DownloadHistoryItem, type DownloadItem, type DownloadMode, type DownloadTask, type SourceKey } from '../downloader-api';
 import { background, foregroundStyle, tint } from '../native-colors';
+import { LiquidProgress, PopIn } from '../modules/superapp-native/animations';
 import { PageNative, alertUnsaved, SectionHeadingNative, SymbolImage, type ThemeTokens, makeId, nativeGlassAvailable, textModifiers, usePageWidth } from './shared';
 
 const BRAND_ICONS: Record<Exclude<SourceKey, 'other'>, { glyph: string; background: string; foreground: string }> = {
@@ -533,7 +534,9 @@ function DownloadBarNative({ state, fraction, preparing, tokens, onDownload, onC
 
   const fill = fraction == null ? 0 : Math.max(BAR_HEIGHT, barWidth * fraction);
   return <ZStack alignment="leading" modifiers={[box, ...surface]}>
-    <VStack modifiers={[frame({ width: fill, height: BAR_HEIGHT }), background(tokens.blue), opacity(0.28), clipShape('capsule'), animation(Animation.spring({ duration: 0.45 }), fill)]}>{null}</VStack>
+    <LiquidProgress progress={fraction ?? -1} color={tokens.blue} modifiers={[box, opacity(0.32), clipShape('capsule')]} fallback={
+      <VStack modifiers={[frame({ width: fill, height: BAR_HEIGHT }), background(tokens.blue), opacity(0.28), clipShape('capsule'), animation(Animation.spring({ duration: 0.45 }), fill)]}>{null}</VStack>
+    } />
     {/* Padding sits inside the fixed frame so the content can never widen the capsule. */}
     <HStack alignment="center" spacing={8} modifiers={[padding({ leading: 20, trailing: 4 }), box]}>
       {preparing ? <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'subheadline', weight: 'semibold' })}>Preparando</NativeText> : null}
@@ -796,6 +799,14 @@ export function DownloaderNative({ tokens, dataSaver, onDataSaverChange, onBack,
     : [analysis.previewHlsUrl, analysis.previewUrl, analysis.previewRelayUrl].filter((value): value is string => Boolean(value));
   const previewImage = item?.thumbnail ?? analysis?.thumbnail ?? null;
   const duration = formatDuration(item?.durationSeconds ?? analysis?.durationSeconds);
+  // Each newly recognised platform pops into the field.
+  const lastSource = useRef<string | null>(null);
+  const popCount = useRef(0);
+  if ((source?.key ?? null) !== lastSource.current) {
+    lastSource.current = source?.key ?? null;
+    if (source) popCount.current += 1;
+  }
+  const sourcePops = popCount.current;
   const showBar = Boolean(analysis) && (phase === 'ready' || phase === 'downloading' || phase === 'done');
   const pageWidth = usePageWidth();
 
@@ -808,7 +819,7 @@ export function DownloaderNative({ tokens, dataSaver, onDataSaverChange, onBack,
           <VStack alignment="leading" spacing={20} modifiers={[frame({ width: pageWidth, alignment: 'leading' }), padding({ horizontal: UI.pageInset, top: 0, bottom: showBar ? BAR_HEIGHT + 48 : 32 })]}>
             {/* The link is a floating glass search bar, like Safari's address field. */}
             <HStack alignment="center" spacing={10} modifiers={[frame({ maxWidth: Infinity, minHeight: 54 }), padding({ leading: 10, trailing: 6 }), ...(nativeGlassAvailable ? [glassEffect({ glass: { variant: 'regular' }, shape: 'capsule' })] : [background(tokens.surface), clipShape('capsule')])]}>
-              {source ? <SourceIconNative source={source.key} tokens={tokens} size={32} /> : <ZStack alignment="center" modifiers={[frame({ width: 32, height: 32 })]}><SymbolImage name="link" color={tokens.secondary} size={18} /></ZStack>}
+              {source ? <PopIn trigger={sourcePops}><SourceIconNative source={source.key} tokens={tokens} size={32} /></PopIn> : <ZStack alignment="center" modifiers={[frame({ width: 32, height: 32 })]}><SymbolImage name="link" color={tokens.secondary} size={18} /></ZStack>}
               <TextField ref={urlInput} text={urlState} onTextChange={(value) => { if (value !== urlRef.current) reset(value); }} placeholder="Pega un enlace" onFocusChange={setUrlFocused} modifiers={[frame({ maxWidth: Infinity }), font({ textStyle: 'body' }), lineLimit(1), textFieldStyle('plain'), keyboardType('url'), textInputAutocapitalization('never'), autocorrectionDisabled(), disabled(phase === 'downloading'), accessibilityLabel('Enlace del contenido'), submitLabel('go'), onSubmit(() => void analyze())]} />
               <FieldActionNative tokens={tokens} {...fieldAction(url, urlFocused, phase, Boolean(analysis))} onPaste={() => void paste()} onClear={() => { reset(''); void urlInput.current?.focus(); }} onAnalyze={() => void analyze()} />
             </HStack>

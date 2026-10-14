@@ -11,6 +11,7 @@ import { useCurrentTime } from '../use-current-time';
 import { UI } from '../ui-structure';
 import { background, foregroundStyle, strokeBorder, tint } from '../native-colors';
 import { scanIssueText, type ScannedClass } from '../schedule-scan';
+import { SteamCup, animationsAvailable } from '../modules/superapp-native/animations';
 import { AdaptiveRow, ColorSwatchesNative, DAYS, GlassControlGroup, NativeCircleButton, PageNative, SHEET_ACTION_INSET, type ScheduleView, SymbolImage, type ThemeTokens, colorForKey, currentDayIndex, dateToTime, durationLabel, findConflict, groupedListModifiers, hasNativeView, isValidTime, makeId, minutesFromTime, sortedEntries, textModifiers, timeRange, timeToDate, usePageWidth, withAlpha } from './shared';
 
 export function AIScanReviewNative({
@@ -475,7 +476,11 @@ export function ScheduleNative({ entries, tokens, selectedDay, onCreate, onScanA
             <NativeButton label="Reintentar" onPress={onRetry} modifiers={[buttonStyle('bordered'), controlSize('regular'), tint(tokens.blue)]} />
           </StateRowNative>
         </Section> : (view === 'day' ? !dayEntries.length : !entries.length) ? <Section>
-          <ContentUnavailableView title={entries.length ? 'Día libre' : 'Sin clases'} systemImage={entries.length ? 'sun.max' : 'calendar'} modifiers={[padding({ vertical: 32 }), ...CLEAR_ROW]} />
+          {entries.length ? <SteamCup color={tokens.secondary} steam={tokens.border} modifiers={[frame({ maxWidth: Infinity }), ...CLEAR_ROW]} fallback={
+            <ContentUnavailableView title="Día libre" systemImage="sun.max" modifiers={[padding({ vertical: 32 }), ...CLEAR_ROW]} />
+          } /> : null}
+          {entries.length && animationsAvailable ? <NativeText modifiers={[...textModifiers(tokens, { style: 'title3', weight: 'semibold' }), frame({ maxWidth: Infinity }), multilineTextAlignment('center'), padding({ bottom: 24 }), ...CLEAR_ROW]}>Día libre</NativeText> : null}
+          {entries.length ? null : <ContentUnavailableView title="Sin clases" systemImage="calendar" modifiers={[padding({ vertical: 32 }), ...CLEAR_ROW]} />}
         </Section> : view === 'day' ? (
           <Section>
             {dayEntries.map((entry) => <ScheduleEntryRowNative key={entry.id} entry={entry} tokens={tokens} state={entryState(entry)} onPress={() => onEdit(entry)} />)}

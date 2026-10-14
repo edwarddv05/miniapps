@@ -27,6 +27,7 @@ export const LIBRARY_KEY = '@miniapps/anime-library';
 const STALE_AFTER = 6 * 60 * 60 * 1000;
 // Never ask more often than this, whatever looks stale.
 const MIN_REFRESH_INTERVAL = 15 * 60 * 1000;
+const FORCED_REFRESH_INTERVAL = 60 * 1000;
 
 export const LIST_STATUS_LABELS: Record<ListStatus, string> = { watching: 'Viendo', planning: 'Me interesa', completed: 'Terminado' };
 
@@ -204,15 +205,17 @@ export function updateLibrarySnapshot(anime: AnimeSummary) {
 // One batched request for the saved anime whose airing data can change, and
 // only when something is stale: an episode that should have aired by now, or
 // data older than STALE_AFTER. Finished and completed ones are never asked for.
-export async function refreshLibrary() {
+// A pull to refresh (`force`) skips the staleness check but not a short wait
+// between requests.
+export async function refreshLibrary(force = false) {
   await loadLibrary();
   if (state.failed) return;
   if (refreshing) return refreshing;
   const now = Date.now();
   const live = state.entries.filter((entry) => entry.status !== 'completed' && entry.anime.status !== 'FINISHED' && entry.anime.status !== 'CANCELLED');
-  if (!live.length || now - state.lastRefresh < MIN_REFRESH_INTERVAL) return;
+  if (!live.length || now - state.lastRefresh < (force ? FORCED_REFRESH_INTERVAL : MIN_REFRESH_INTERVAL)) return;
   const overdue = live.some((entry) => entry.anime.nextEpisode && entry.anime.nextEpisode.airingAt * 1000 <= now);
-  if (!overdue && now - state.lastRefresh < STALE_AFTER) return;
+  if (!force && !overdue && now - state.lastRefresh < STALE_AFTER) return;
   refreshing = animeSummariesByIds(live.map((entry) => entry.id))
     .then(async (fresh) => {
       const byId = new Map(fresh.map((anime) => [anime.id, anime]));

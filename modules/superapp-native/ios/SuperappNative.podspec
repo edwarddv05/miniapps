@@ -11,6 +11,7 @@ Pod::Spec.new do |s|
   s.swift_version  = '5.9'
 
   s.dependency 'ExpoModulesCore'
+  s.dependency 'ExpoUI'
 
   # Downloaded by scripts/ipa/fetch-python.sh; not kept in git.
   s.vendored_frameworks = 'Python.xcframework'

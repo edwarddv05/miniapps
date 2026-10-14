@@ -20,6 +20,7 @@ import { DATA_SAVER_KEY, DAYS, DataStateNative, NativeCircleButton, PageNative, 
 import { DownloaderNative, type SharedLink } from './screens/downloader';
 import { parseAppLink } from './app-links';
 import { syncScheduleWidget } from './widget-sync';
+import { Sky } from './modules/superapp-native/animations';
 import { AnimeNative, AnimeTodayNative } from './screens/anime';
 import { TRANSIT_ICON, TransitNative, TransitTodayNative } from './screens/transit';
 import { CARDS_ICON, CardsNative, CardsTodayNative, useCardsLibraryDetail } from './screens/cards';
@@ -72,6 +73,7 @@ function HomeNative({ entries, tokens, loading, error, onOpenSchedule, onOpenAni
     <PageNative title="Hoy" subtitle={dateLine} tokens={tokens} ambient={ready ? accent?.main : null} action={<NativeCircleButton tokens={tokens} label="Abrir horario" systemName="calendar" onPress={onOpenSchedule} />}>
       <ReadingCanvasNative tokens={tokens}>
         {ready ? <>
+          <Sky minute={nowMinutes} dark={tokens.mode === 'dark'} color={skyColor(nowMinutes, tokens.mode)} line={tokens.border} text={tokens.secondary} modifiers={[frame({ maxWidth: Infinity, height: 92 })]} />
           {hero}
           {upcoming.length ? <VStack alignment="leading" spacing={12} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' })]}>
             <SectionHeadingNative title="Después" tokens={tokens} />
@@ -90,6 +92,13 @@ function HomeNative({ entries, tokens, loading, error, onOpenSchedule, onOpenAni
       </ReadingCanvasNative>
     </PageNative>
   );
+}
+
+// The sun by day (6:00–18:30, Lima's daylight), the moon by night.
+function skyColor(minute: number, mode: ThemeTokens['mode']) {
+  const day = minute >= 360 && minute < 1110;
+  if (day) return mode === 'dark' ? '#FF9F0A' : '#FF9500';
+  return mode === 'dark' ? '#E5E5EA' : '#8E8E93';
 }
 
 // One stop on the day's line: a dot in the class colour, a thin rule down to
