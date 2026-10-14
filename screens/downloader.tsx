@@ -1,8 +1,8 @@
 // Downloader: preview player, download bar and recent downloads.
 
 import * as Haptics from 'expo-haptics';
-import { Button as NativeButton, ContextMenu, Divider, HStack, Menu, Section, Toggle, Image as NativeImage, Picker, ProgressView, RNHostView, ScrollView, Spacer, Text as NativeText, TextField, type TextFieldRef, VStack, ZStack, useNativeState } from '@expo/ui/swift-ui';
-import { accessibilityLabel, accessibilityAddTraits, accessibilityElement, accessibilityHidden, accessibilityValue, animation, Animation, blur, clipped, buttonStyle, clipShape, contentShape, controlSize, disabled, font, frame, glassEffect, autocorrectionDisabled, keyboardType, textInputAutocapitalization, lineLimit, listRowInsets, menuIndicator, monospacedDigit, onSubmit, offset, onGeometryChange, onTapGesture, opacity, padding, pickerStyle, resizable, scrollDismissesKeyboard, shadow, shapes, submitLabel, symbolEffect, tag, textFieldStyle, type ViewModifier } from '@expo/ui/swift-ui/modifiers';
+import { Button as NativeButton, Divider, HStack, Menu, Section, Toggle, Image as NativeImage, Picker, ProgressView, RNHostView, ScrollView, Spacer, Text as NativeText, TextField, type TextFieldRef, VStack, ZStack, useNativeState } from '@expo/ui/swift-ui';
+import { accessibilityLabel, accessibilityAddTraits, accessibilityElement, accessibilityHidden, accessibilityValue, animation, Animation, blur, clipped, buttonStyle, clipShape, contentShape, controlSize, disabled, font, frame, glassEffect, autocorrectionDisabled, contentTransition, scaleEffect, keyboardType, textInputAutocapitalization, lineLimit, listRowInsets, menuIndicator, monospacedDigit, onSubmit, offset, onGeometryChange, onTapGesture, opacity, padding, pickerStyle, resizable, scrollDismissesKeyboard, shadow, shapes, submitLabel, symbolEffect, tag, textFieldStyle, type ViewModifier } from '@expo/ui/swift-ui/modifiers';
 import type { SFSymbol } from 'sf-symbols-typescript';
 import { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { Image as RNImage, Pressable, ScrollView as ScrollViewRN, StyleSheet, useWindowDimensions, View } from 'react-native';
@@ -12,10 +12,11 @@ import { Asset } from 'expo-asset';
 import { useEvent } from 'expo';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { UI } from '../ui-structure';
-import { analyzeUrl, checkDownloader, LOCAL_DOWNLOADER, downloaderUrl, loadDownloaderUrl, normalizeServerUrl, saveDownloaderUrl, deleteLocalFile, detectDownloadSource, DownloadCancelledError, downloaderErrorMessage, fileExists, formatDuration, loadDownloadHistory, saveDownloadHistory, shareFile, sourceForKey, startDownload, type DownloadAnalysis, type DownloadHistoryItem, type DownloadItem, type DownloadMode, type DownloadTask, type SourceKey } from '../downloader-api';
+import { analyzeUrl, checkDownloader, LOCAL_DOWNLOADER, downloaderUrl, loadDownloaderUrl, normalizeServerUrl, saveDownloaderUrl, deleteLocalFile, detectDownloadSource, DownloadCancelledError, downloaderErrorMessage, fileExists, fileSize, formatBytes, formatDuration, loadDownloadHistory, saveDownloadHistory, shareFile, sourceForKey, startDownload, type DownloadAnalysis, type DownloadHistoryItem, type DownloadItem, type DownloadMode, type DownloadQuality, type DownloadTask, type SourceKey } from '../downloader-api';
 import { background, foregroundStyle, tint } from '../native-colors';
-import { LiquidProgress, PopIn } from '../modules/superapp-native/animations';
-import { PageNative, alertUnsaved, SectionHeadingNative, SymbolImage, type ThemeTokens, makeId, nativeGlassAvailable, textModifiers, usePageWidth } from './shared';
+import { LiquidProgress, PopIn, TrashDrop } from '../modules/superapp-native/animations';
+import { DownloadsPageNative, SavedCountBadgeNative, SavedShelfNative, UndoBarNative } from './downloads';
+import { NativeCircleButton, PageNative, alertUnsaved, SectionHeadingNative, SymbolImage, type ThemeTokens, makeId, nativeGlassAvailable, textModifiers, usePageWidth } from './shared';
 
 const BRAND_ICONS: Record<Exclude<SourceKey, 'other'>, { glyph: string; background: string; foreground: string }> = {
   youtube: { glyph: 'youtube', background: '#FF0033', foreground: '#FFFFFF' },
@@ -497,14 +498,14 @@ function ItemStripNative({ items, selectedId, tokens, onSelect }: { items: Downl
 const MODE_LABELS: Record<DownloadMode, string> = { video: 'Video', audio: 'Audio', image: 'Foto', thumbnail: 'Miniatura' };
 const MODE_SYMBOLS: Record<DownloadMode, SFSymbol> = { video: 'film', audio: 'music.note', image: 'photo', thumbnail: 'photo.on.rectangle' };
 const BAR_HEIGHT = 50;
-const BAR_MAX_WIDTH = 240;
+const BAR_MAX_WIDTH = 300;
 
 type BarState = 'ready' | 'downloading' | 'done';
 
 // One capsule with fixed geometry in every state, so the action morphs into
 // its own progress bar and back without the layout moving. The label stays
-// "Descargar": format and quality are already chosen above it.
-function DownloadBarNative({ state, fraction, preparing, tokens, onDownload, onCancel }: { state: BarState; fraction: number | null; preparing: boolean; tokens: ThemeTokens; onDownload: () => void; onCancel: () => void }) {
+// "Descargar" with the estimated weight: format and quality are chosen above it.
+function DownloadBarNative({ state, fraction, preparing, weight, tokens, onDownload, onCancel }: { state: BarState; fraction: number | null; preparing: boolean; weight: string | null; tokens: ThemeTokens; onDownload: () => void; onCancel: () => void }) {
   const { width } = useWindowDimensions();
   const barWidth = Math.min(BAR_MAX_WIDTH, Math.min(width, UI.contentWidth) - UI.pageInset * 2);
   const doneTick = useNativeState(0);
@@ -519,9 +520,10 @@ function DownloadBarNative({ state, fraction, preparing, tokens, onDownload, onC
   const box = frame({ width: barWidth, height: BAR_HEIGHT });
 
   if (state === 'ready') {
-    return <HStack alignment="center" spacing={8} modifiers={[box, ...surface, contentShape(shapes.capsule()), onTapGesture(onDownload), accessibilityElement('ignore'), accessibilityLabel('Descargar'), accessibilityAddTraits(['isButton'])]}>
+    return <HStack alignment="center" spacing={8} modifiers={[box, ...surface, contentShape(shapes.capsule()), onTapGesture(onDownload), accessibilityElement('ignore'), accessibilityLabel(weight ? `Descargar, ${weight}` : 'Descargar'), accessibilityAddTraits(['isButton'])]}>
       <NativeImage systemName="arrow.down" modifiers={[font({ textStyle: 'headline', weight: 'semibold' }), foregroundStyle(tokens.inverseText)]} />
       <NativeText modifiers={textModifiers(tokens, { color: tokens.inverseText, style: 'headline', weight: 'semibold' })}>Descargar</NativeText>
+      {weight ? <NativeText modifiers={[...textModifiers(tokens, { color: tokens.inverseText, style: 'subheadline', weight: 'medium' }), opacity(0.75), monospacedDigit()]}>{`· ${weight}`}</NativeText> : null}
     </HStack>;
   }
 
@@ -613,6 +615,84 @@ function DownloaderSettingsNative({ tokens, dataSaver, onDataSaverChange }: { to
   </>;
 }
 
+const QUALITY_NAMES: Array<[number, string]> = [[2160, '4K'], [1440, '2K'], [1080, 'Full HD'], [720, 'HD'], [480, 'SD']];
+const qualityName = (quality: DownloadQuality) => QUALITY_NAMES.find(([side]) => Number(quality.id) >= side)?.[1] ?? null;
+const estimate = (bytes: number | null | undefined) => (bytes ? `≈ ${formatBytes(bytes)}` : null);
+
+// Format as round buttons, each with what it would save.
+function FormatChoicesNative({ modes, active, details, tokens, disabled: isDisabled, onSelect }: { modes: DownloadMode[]; active: DownloadMode; details: Partial<Record<DownloadMode, string>>; tokens: ThemeTokens; disabled: boolean; onSelect: (mode: DownloadMode) => void }) {
+  return <HStack alignment="top" spacing={0} modifiers={[frame({ maxWidth: Infinity }), accessibilityLabel('Formato')]}>
+    {modes.map((option) => {
+      const selected = option === active;
+      const circle: ViewModifier[] = nativeGlassAvailable
+        ? [glassEffect({ glass: { variant: 'regular', interactive: true, ...(selected ? { tint: tokens.blue } : {}) }, shape: 'circle' })]
+        : [background(selected ? tokens.blue : tokens.surface), clipShape('circle')];
+      const detail = details[option];
+      return <NativeButton key={option} onPress={() => onSelect(option)} modifiers={[buttonStyle('plain'), frame({ maxWidth: Infinity }), disabled(isDisabled), accessibilityLabel([MODE_LABELS[option], detail].filter(Boolean).join(', ')), ...(selected ? [accessibilityAddTraits(['isSelected'])] : [])]}>
+        <VStack alignment="center" spacing={6} modifiers={[frame({ maxWidth: Infinity }), contentShape(shapes.rectangle())]}>
+          <ZStack alignment="center" modifiers={[frame({ width: 58, height: 58 }), ...circle, animation(Animation.spring({ duration: 0.3 }), selected)]}>
+            <NativeImage systemName={MODE_SYMBOLS[option]} modifiers={[font({ size: 22, weight: 'medium' }), foregroundStyle(selected ? tokens.inverseText : tokens.text)]} />
+          </ZStack>
+          <NativeText modifiers={textModifiers(tokens, { color: selected ? tokens.text : tokens.secondary, style: 'subheadline', weight: 'semibold' })}>{MODE_LABELS[option]}</NativeText>
+          {detail ? <NativeText modifiers={[...textModifiers(tokens, { color: tokens.secondary, style: 'caption' }), monospacedDigit(), lineLimit(1)]}>{detail}</NativeText> : null}
+        </VStack>
+      </NativeButton>;
+    })}
+  </HStack>;
+}
+
+// The quality in large type with its weight; the arrows step through the
+// options from the best down, and the dots show where in the list it is.
+function QualityStepperNative({ qualities, index, tokens, disabled: isDisabled, onChange }: { qualities: DownloadQuality[]; index: number; tokens: ThemeTokens; disabled: boolean; onChange: (index: number) => void }) {
+  const quality = qualities[index];
+  const caption = [qualityName(quality), estimate(quality.sizeBytes)].filter(Boolean).join(' · ');
+  const arrow = (direction: -1 | 1) => {
+    const blocked = isDisabled || index + direction < 0 || index + direction >= qualities.length;
+    return <NativeButton onPress={() => onChange(index + direction)} modifiers={[buttonStyle('plain'), frame({ width: 48, height: 48 }), contentShape(shapes.circle()), disabled(blocked), accessibilityLabel(direction < 0 ? 'Más calidad' : 'Menos calidad')]}>
+      <NativeImage systemName={direction < 0 ? 'chevron.left' : 'chevron.right'} modifiers={[font({ size: 20, weight: 'semibold' }), foregroundStyle(blocked ? tokens.muted : tokens.blue)]} />
+    </NativeButton>;
+  };
+  return <VStack alignment="center" spacing={10} modifiers={[frame({ maxWidth: Infinity })]}>
+    <HStack alignment="center" spacing={4} modifiers={[frame({ maxWidth: Infinity })]}>
+      {arrow(-1)}
+      <VStack alignment="center" spacing={2} modifiers={[frame({ maxWidth: Infinity }), accessibilityElement('combine'), accessibilityLabel(`Calidad ${quality.label}${caption ? `, ${caption}` : ''}`)]}>
+        <NativeText modifiers={[font({ size: 34, weight: 'bold', design: 'rounded' }), foregroundStyle(tokens.text), monospacedDigit(), contentTransition('numericText'), animation(Animation.spring({ duration: 0.35 }), index)]}>{quality.label}</NativeText>
+        {caption ? <NativeText modifiers={[...textModifiers(tokens, { color: tokens.secondary, style: 'subheadline' }), monospacedDigit(), contentTransition('numericText'), animation(Animation.spring({ duration: 0.35 }), index)]}>{caption}</NativeText> : null}
+      </VStack>
+      {arrow(1)}
+    </HStack>
+    <HStack alignment="center" spacing={6} modifiers={[accessibilityHidden()]}>
+      {qualities.map((option, position) => <VStack key={option.id} modifiers={[frame({ width: position === index ? 16 : 6, height: 6 }), background(position === index ? tokens.blue : tokens.muted), clipShape('capsule'), opacity(position === index ? 1 : 0.5), animation(Animation.spring({ duration: 0.3 }), position === index), contentShape(shapes.rectangle()), onTapGesture(() => { if (!isDisabled) onChange(position); })]}>{null}</VStack>)}
+    </HStack>
+  </VStack>;
+}
+
+// The header's way into Descargas, with how many files are saved.
+function DownloadsButtonNative({ count, tokens, onPress }: { count: number; tokens: ThemeTokens; onPress: () => void }) {
+  return <ZStack alignment="topTrailing">
+    <NativeCircleButton tokens={tokens} label={count ? `Descargas, ${count}` : 'Descargas'} systemName="tray.and.arrow.down" onPress={onPress} />
+    {count ? <PopIn trigger={count} modifiers={[offset({ x: 5, y: -4 })]}><SavedCountBadgeNative count={count} tokens={tokens} /></PopIn> : null}
+  </ZStack>;
+}
+
+type Flight = { image: string; stage: 0 | 1 };
+
+// A finished download's picture flies from the preview into the Descargas
+// button. The page body's top-trailing corner is the anchor: the button's
+// centre sits 40 pt above it and 22 pt in from the page inset.
+const FLIGHT_WIDTH = 160;
+const FLIGHT_HEIGHT = 90;
+function FlightNative({ flight, pageWidth }: { flight: Flight; pageWidth: number }) {
+  const at = flight.stage === 0
+    ? { x: -(pageWidth / 2 - FLIGHT_WIDTH / 2), y: 80 }
+    : { x: FLIGHT_WIDTH / 2 - 22, y: -40 - FLIGHT_HEIGHT / 2 };
+  return <VStack modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity, alignment: 'topTrailing' }), padding({ trailing: UI.pageInset }), accessibilityHidden()]}>
+    <VStack modifiers={[frame({ width: FLIGHT_WIDTH, height: FLIGHT_HEIGHT }), clipShape('roundedRectangle', 14), scaleEffect(flight.stage === 0 ? 1 : 0.2), offset(at), opacity(flight.stage === 0 ? 1 : 0.25), animation(Animation.easeInOut({ duration: 0.65 }), flight.stage)]}>
+      <RNHostView><RNImage source={{ uri: flight.image }} style={{ flex: 1, backgroundColor: '#000000' }} resizeMode="cover" /></RNHostView>
+    </VStack>
+  </VStack>;
+}
+
 /** A link shared to the app from another app's share sheet. */
 export type SharedLink = { url: string; nonce: number };
 
@@ -627,14 +707,22 @@ export function DownloaderNative({ tokens, dataSaver, onDataSaverChange, onBack,
   const [analysis, setAnalysis] = useState<DownloadAnalysis | null>(null);
   const [itemId, setItemId] = useState('');
   const [mode, setMode] = useState<DownloadMode>('video');
-  const [qualityHeight, setQualityHeight] = useState<number | null>(null);
+  const [qualityId, setQualityId] = useState<string | null>(null);
   const [audioTrackId, setAudioTrackId] = useState('');
   const [fraction, setFraction] = useState<number | null>(null);
   const [preparing, setPreparing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<DownloadHistoryItem[]>([]);
+  const historyRef = useRef(history);
+  historyRef.current = history;
+  const [showDownloads, setShowDownloads] = useState(false);
+  const [flight, setFlight] = useState<Flight | null>(null);
+  const flightTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  // A deletion waits five seconds for Deshacer before the file goes.
+  const pending = useRef<{ entry: DownloadHistoryItem; timer: ReturnType<typeof setTimeout> | null } | null>(null);
+  const [trash, setTrash] = useState<{ image: string | null; trigger: number; active: boolean }>({ image: null, trigger: 0, active: false });
+  const [undoEntry, setUndoEntry] = useState<DownloadHistoryItem | null>(null);
   const analyzeController = useRef<AbortController | null>(null);
-  // A shared link downloads as soon as its analysis is ready, with the default format.
   const task = useRef<DownloadTask | null>(null);
   const doneTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const source = detectDownloadSource(url);
@@ -644,17 +732,47 @@ export function DownloaderNative({ tokens, dataSaver, onDataSaverChange, onBack,
   const modes: DownloadMode[] = !analysis ? [] : item?.kind === 'image' ? ['image'] : item?.kind === 'video' && item.mediaUrl ? ['video'] : analysis.modes.filter((option) => option !== 'image' || !item);
   const activeMode = modes.includes(mode) ? mode : modes[0] ?? 'video';
   const directFile = Boolean(item?.mediaUrl ?? analysis?.mediaUrl);
-  const showQuality = activeMode === 'video' && !directFile && (analysis?.qualities.length ?? 0) > 1;
+  const qualities = analysis?.qualities ?? [];
+  const qualityIndex = Math.max(0, qualities.findIndex((quality) => quality.id === qualityId));
+  const quality = qualities[qualityIndex] ?? null;
+  const showQuality = activeMode === 'video' && !directFile && qualities.length > 1;
   const audioTrack = analysis?.audioTracks.find((track) => track.id === audioTrackId) ?? analysis?.audioTracks[0] ?? null;
   const showAudioTracks = !item && (activeMode === 'video' || activeMode === 'audio') && (analysis?.audioTracks.length ?? 0) > 1;
   const busy = phase === 'analyzing' || phase === 'downloading';
+  // Weights are yt-dlp's estimates for a whole post; one item of a carousel has none.
+  const videoWeight = !item && !directFile ? quality?.sizeBytes ?? null : null;
+  const audioWeight = !item ? analysis?.audioSizeBytes ?? null : null;
+  const weight = activeMode === 'video' ? estimate(videoWeight) : activeMode === 'audio' ? estimate(audioWeight) : null;
+  const formatDetails: Partial<Record<DownloadMode, string>> = {
+    video: [!directFile && quality ? quality.label : null, videoWeight ? formatBytes(videoWeight) : null].filter(Boolean).join(' · ') || undefined,
+    audio: ['M4A', audioWeight ? formatBytes(audioWeight) : null].filter(Boolean).join(' · '),
+  };
+
+  const commitRemoval = () => {
+    const removal = pending.current;
+    if (!removal) return;
+    pending.current = null;
+    if (removal.timer) clearTimeout(removal.timer);
+    void deleteLocalFile(removal.entry.uri);
+    void saveDownloadHistory(historyRef.current).catch(() => undefined);
+  };
 
   useEffect(() => {
-    void loadDownloadHistory().then(setHistory);
+    void loadDownloadHistory().then(async (saved) => {
+      setHistory(saved);
+      // Entries saved before sizes were kept get them measured once.
+      const missing = saved.filter((entry) => entry.sizeBytes == null);
+      if (!missing.length) return;
+      const measured = await Promise.all(saved.map(async (entry) => (entry.sizeBytes == null ? { ...entry, sizeBytes: await fileSize(entry.uri) ?? 0 } : entry)));
+      setHistory((current) => current.map((entry) => measured.find((candidate) => candidate.id === entry.id) ?? entry));
+      await saveDownloadHistory(measured).catch(() => undefined);
+    });
     return () => {
       analyzeController.current?.abort();
       task.current?.cancel();
       if (doneTimer.current) clearTimeout(doneTimer.current);
+      for (const timer of flightTimers.current) clearTimeout(timer);
+      commitRemoval();
     };
   }, []);
 
@@ -665,7 +783,7 @@ export function DownloaderNative({ tokens, dataSaver, onDataSaverChange, onBack,
     urlState.set(value);
     setAnalysis(null);
     setItemId('');
-    setQualityHeight(null);
+    setQualityId(null);
     setPhase('idle');
     setError(null);
   };
@@ -686,7 +804,7 @@ export function DownloaderNative({ tokens, dataSaver, onDataSaverChange, onBack,
       // The server lists the original language first.
       setAudioTrackId(result.audioTracks[0]?.id ?? '');
       setMode(result.modes[0]);
-      setQualityHeight(result.qualities.find((quality) => Number(quality.id) <= 1080)?.height ?? result.qualities[0]?.height ?? null);
+      setQualityId(result.qualities.find((option) => Number(option.id) <= 1080)?.id ?? result.qualities[0]?.id ?? null);
       setPhase('ready');
     } catch (reason) {
       if (controller.signal.aborted) return;
@@ -707,11 +825,25 @@ export function DownloaderNative({ tokens, dataSaver, onDataSaverChange, onBack,
   };
 
   const rememberDownload = async (entry: DownloadHistoryItem) => {
-    const next = [entry, ...history];
+    const next = [entry, ...historyRef.current];
     const kept = next.slice(0, 20);
     for (const dropped of next.slice(20)) await deleteLocalFile(dropped.uri);
     setHistory(kept);
     await saveDownloadHistory(kept).catch(() => undefined);
+  };
+
+  // The saved picture flies to the Descargas button; its count goes up when it lands.
+  const fly = (image: string | null) => {
+    for (const timer of flightTimers.current) clearTimeout(timer);
+    if (!image) {
+      setFlight(null);
+      return;
+    }
+    setFlight({ image, stage: 0 });
+    flightTimers.current = [
+      setTimeout(() => setFlight({ image, stage: 1 }), 60),
+      setTimeout(() => setFlight(null), 760),
+    ];
   };
 
   const download = async () => {
@@ -723,7 +855,7 @@ export function DownloaderNative({ tokens, dataSaver, onDataSaverChange, onBack,
     const current = startDownload({
       url: item?.url ?? url,
       mode: activeMode,
-      quality: activeMode === 'video' ? qualityHeight : null,
+      quality: activeMode === 'video' ? quality?.height ?? null : null,
       mediaUrl: activeMode === 'audio' ? null : item?.mediaUrl ?? analysis.mediaUrl,
       itemIndex: item && !item.mediaUrl ? item.index : null,
       audioLanguage: showAudioTracks && audioTrack && !audioTrack.original ? audioTrack.id : null,
@@ -734,6 +866,7 @@ export function DownloaderNative({ tokens, dataSaver, onDataSaverChange, onBack,
     task.current = current;
     try {
       const { result, uri } = await current.promise;
+      const thumbnail = item?.thumbnail ?? analysis.thumbnail;
       await rememberDownload({
         id: makeId(),
         title: item && analysis.items.length > 1 ? `${analysis.title} · ${item.title}` : analysis.title,
@@ -742,13 +875,15 @@ export function DownloaderNative({ tokens, dataSaver, onDataSaverChange, onBack,
         filename: result.filename,
         mimeType: result.mimeType,
         uri,
-        thumbnail: item?.thumbnail ?? analysis.thumbnail,
+        thumbnail,
         createdAt: Date.now(),
+        sizeBytes: await fileSize(uri) ?? result.sizeBytes ?? null,
+        durationSeconds: item?.durationSeconds ?? analysis.durationSeconds ?? null,
       });
+      fly(thumbnail);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setPhase('done');
       doneTimer.current = setTimeout(() => setPhase((value) => (value === 'done' ? 'ready' : value)), 1800);
-      await shareFile(uri, result.mimeType, result.filename);
     } catch (reason) {
       setPhase('ready');
       if (!(reason instanceof DownloadCancelledError)) setError(downloaderErrorMessage(reason, 'No se pudo completar la descarga.'));
@@ -765,15 +900,45 @@ export function DownloaderNative({ tokens, dataSaver, onDataSaverChange, onBack,
       return;
     }
     // A shared link is analysed; downloading stays the owner's choice.
+    setShowDownloads(false);
     reset(sharedLink.url);
     void analyze(sharedLink.url);
   }, [sharedLink?.nonce]);
 
   const removeHistory = async (entry: DownloadHistoryItem) => {
     await deleteLocalFile(entry.uri);
-    const kept = history.filter((candidate) => candidate.id !== entry.id);
+    const kept = historyRef.current.filter((candidate) => candidate.id !== entry.id);
     setHistory(kept);
     await saveDownloadHistory(kept).catch(() => undefined);
+  };
+
+  // Deleting drops the file into the bin, then offers Deshacer.
+  const requestRemoval = (entry: DownloadHistoryItem) => {
+    commitRemoval();
+    setUndoEntry(null);
+    pending.current = { entry, timer: null };
+    setHistory((current) => current.filter((candidate) => candidate.id !== entry.id));
+    setTrash((current) => ({ image: entry.thumbnail, trigger: current.trigger + 1, active: true }));
+  };
+
+  const onTrashFinished = () => {
+    setTrash((current) => ({ ...current, active: false }));
+    const removal = pending.current;
+    if (!removal) return;
+    setUndoEntry(removal.entry);
+    removal.timer = setTimeout(() => {
+      commitRemoval();
+      setUndoEntry(null);
+    }, 5000);
+  };
+
+  const undoRemoval = () => {
+    const removal = pending.current;
+    if (!removal) return;
+    if (removal.timer) clearTimeout(removal.timer);
+    pending.current = null;
+    setUndoEntry(null);
+    setHistory((current) => [...current, removal.entry].sort((a, b) => b.createdAt - a.createdAt));
   };
 
   const openHistory = async (entry: DownloadHistoryItem) => {
@@ -799,14 +964,28 @@ export function DownloaderNative({ tokens, dataSaver, onDataSaverChange, onBack,
   const sourcePops = popCount.current;
   const showBar = Boolean(analysis) && (phase === 'ready' || phase === 'downloading' || phase === 'done');
   const pageWidth = usePageWidth();
+  // The count waits for the flying picture to land.
+  const savedCount = history.length - (flight ? 1 : 0);
+
+  // The bin and the undo bar sit over whichever page the deletion came from.
+  const removalLayer = <>
+    {trash.active ? <TrashDrop image={trash.image} trigger={trash.trigger} tile={tokens.slateSoft} onFinish={onTrashFinished} modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity })]} /> : null}
+    {undoEntry ? <VStack modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity, alignment: 'bottom' }), padding({ horizontal: UI.pageInset, bottom: 12 })]}>
+      <UndoBarNative title={undoEntry.title} tokens={tokens} onUndo={undoRemoval} />
+    </VStack> : null}
+  </>;
+
+  if (showDownloads) {
+    return <DownloadsPageNative history={history} tokens={tokens} onBack={() => setShowDownloads(false)} onOpen={(entry) => void openHistory(entry)} onDelete={requestRemoval} overlay={removalLayer} />;
+  }
 
   return (
-    <PageNative title="Downloader" tokens={tokens} onBack={onBack} onHeaderTap={dismissKeyboard} ambient={analysis?.ambientColor ?? null} settings={<DownloaderSettingsNative tokens={tokens} dataSaver={dataSaver} onDataSaverChange={onDataSaverChange} />}>
+    <PageNative title="Downloader" tokens={tokens} onBack={onBack} onHeaderTap={dismissKeyboard} ambient={analysis?.ambientColor ?? null} settings={<DownloaderSettingsNative tokens={tokens} dataSaver={dataSaver} onDataSaverChange={onDataSaverChange} />} action={<DownloadsButtonNative count={savedCount} tokens={tokens} onPress={() => { dismissKeyboard(); setShowDownloads(true); }} />}>
       <ZStack alignment="bottom" modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity })]}>
         {/* One scrolling column on the page itself: no grouped boxes. Scrolling
             closes the keyboard; static rows close it on tap. */}
         <ScrollView modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity }), scrollDismissesKeyboard('immediately')]}>
-          <VStack alignment="leading" spacing={20} modifiers={[frame({ width: pageWidth, alignment: 'leading' }), padding({ horizontal: UI.pageInset, top: 0, bottom: showBar ? BAR_HEIGHT + 48 : 32 })]}>
+          <VStack alignment="leading" spacing={20} modifiers={[frame({ width: pageWidth, alignment: 'leading' }), padding({ horizontal: UI.pageInset, top: 0, bottom: showBar || undoEntry ? BAR_HEIGHT + 48 : 32 })]}>
             {/* The link is a floating glass search bar, like Safari's address field. */}
             <HStack alignment="center" spacing={10} modifiers={[frame({ maxWidth: Infinity, minHeight: 54 }), padding({ leading: 10, trailing: 6 }), ...(nativeGlassAvailable ? [glassEffect({ glass: { variant: 'regular' }, shape: 'capsule' })] : [background(tokens.surface), clipShape('capsule')])]}>
               {source ? <PopIn trigger={sourcePops}><SourceIconNative source={source.key} tokens={tokens} size={32} /></PopIn> : <ZStack alignment="center" modifiers={[frame({ width: 32, height: 32 })]}><SymbolImage name="link" color={tokens.secondary} size={18} /></ZStack>}
@@ -843,61 +1022,36 @@ export function DownloaderNative({ tokens, dataSaver, onDataSaverChange, onBack,
                 <ItemStripNative items={analysis.items} selectedId={itemId} tokens={tokens} onSelect={(id) => { if (!busy) { setItemId(id); setError(null); } }} />
               </VStack> : null}
 
-              {modes.length > 1 || showQuality || showAudioTracks ? <VStack alignment="leading" spacing={6} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' })]}>
-                {modes.length > 1 ? <Picker selection={activeMode} onSelectionChange={(value) => { setMode(value as DownloadMode); setError(null); }} modifiers={[pickerStyle('segmented'), frame({ maxWidth: Infinity }), padding({ bottom: 6 }), disabled(busy), accessibilityLabel('Formato')]}>
-                  {modes.map((option) => <NativeText key={option} modifiers={[tag(option)]}>{MODE_LABELS[option]}</NativeText>)}
-                </Picker> : null}
-                {showQuality && analysis ? <OptionRowNative label="Calidad" tokens={tokens}>
-                  <Picker selection={qualityHeight ?? analysis.qualities[0].height} onSelectionChange={(value) => setQualityHeight(Number(value))} modifiers={[pickerStyle('menu'), tint(tokens.blue), disabled(busy), accessibilityLabel('Calidad')]}>
-                    {analysis.qualities.map((quality) => <NativeText key={quality.id} modifiers={[tag(quality.height)]}>{quality.label}</NativeText>)}
-                  </Picker>
-                </OptionRowNative> : null}
-                {showQuality && showAudioTracks ? <Divider /> : null}
-                {showAudioTracks && analysis ? <OptionRowNative label="Idioma" tokens={tokens}>
-                  <Picker selection={audioTrack?.id ?? ''} onSelectionChange={(value) => setAudioTrackId(String(value))} modifiers={[pickerStyle('menu'), tint(tokens.blue), disabled(busy), accessibilityLabel('Idioma del audio')]}>
-                    {analysis.audioTracks.map((track) => <NativeText key={track.id} modifiers={[tag(track.id)]}>{track.label}</NativeText>)}
-                  </Picker>
-                </OptionRowNative> : null}
-              </VStack> : null}
+              {modes.length > 1 ? <FormatChoicesNative modes={modes} active={activeMode} details={formatDetails} tokens={tokens} disabled={busy} onSelect={(value) => { setMode(value); setError(null); }} /> : null}
+
+              {showQuality ? <QualityStepperNative qualities={qualities} index={qualityIndex} tokens={tokens} disabled={busy} onChange={(index) => setQualityId(qualities[index]?.id ?? null)} /> : null}
+
+              {showAudioTracks && analysis ? <OptionRowNative label="Idioma" tokens={tokens}>
+                <Picker selection={audioTrack?.id ?? ''} onSelectionChange={(value) => setAudioTrackId(String(value))} modifiers={[pickerStyle('menu'), tint(tokens.blue), disabled(busy), accessibilityLabel('Idioma del audio')]}>
+                  {analysis.audioTracks.map((track) => <NativeText key={track.id} modifiers={[tag(track.id)]}>{track.label}</NativeText>)}
+                </Picker>
+              </OptionRowNative> : null}
             </> : null}
 
-            {history.length ? <VStack alignment="leading" spacing={10} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' })]}>
-              <SectionHeadingNative title="Recientes" tokens={tokens} />
-              {history.map((entry, index) => <VStack key={entry.id} spacing={0} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' })]}>
-                {index > 0 ? <Divider /> : null}
-                <ContextMenu>
-                  <ContextMenu.Trigger>
-                    <NativeButton onPress={() => void openHistory(entry)} modifiers={[buttonStyle('plain'), accessibilityLabel(`${entry.title}, ${MODE_LABELS[entry.mode] ?? ''}`)]}>
-                      <HStack alignment="center" spacing={12} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' }), padding({ vertical: 8 }), contentShape(shapes.rectangle())]}>
-                        <HistoryThumbnailNative entry={entry} tokens={tokens} />
-                        <VStack alignment="leading" spacing={2} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' })]}>
-                          <NativeText modifiers={[...textModifiers(tokens, { style: 'body' }), lineLimit(1)]}>{entry.title}</NativeText>
-                          <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'footnote' })}>{`${MODE_LABELS[entry.mode] ?? 'Archivo'} · ${sourceForKey(entry.source).label} · ${new Intl.DateTimeFormat('es-PE', { day: 'numeric', month: 'short' }).format(entry.createdAt)}`}</NativeText>
-                        </VStack>
-                        <SymbolImage name="square.and.arrow.up" color={tokens.secondary} size={17} />
-                      </HStack>
-                    </NativeButton>
-                  </ContextMenu.Trigger>
-                  <ContextMenu.Items>
-                    <NativeButton label="Compartir" systemImage="square.and.arrow.up" onPress={() => void openHistory(entry)} />
-                    <NativeButton label="Eliminar del iPhone" systemImage="trash" role="destructive" onPress={() => void removeHistory(entry)} />
-                  </ContextMenu.Items>
-                </ContextMenu>
-              </VStack>)}
-            </VStack> : !analysis && phase !== 'analyzing' ? <VStack alignment="leading" spacing={12} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' })]}>
-              <SectionHeadingNative title="Compatibles" tokens={tokens} />
-              <HStack alignment="center" spacing={0} modifiers={[frame({ maxWidth: Infinity }), contentShape(shapes.rectangle()), onTapGesture(dismissKeyboard)]}>
-                {(['youtube', 'instagram', 'facebook', 'x', 'tiktok'] as const).map((key) => <VStack key={key} alignment="center" spacing={6} modifiers={[frame({ maxWidth: Infinity })]}>
-                  <SourceIconNative source={key} tokens={tokens} size={44} />
-                  <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'caption' })}>{sourceForKey(key).label}</NativeText>
-                </VStack>)}
-              </HStack>
-            </VStack> : null}
+            {!analysis && phase !== 'analyzing' ? <>
+              {history.length ? <SavedShelfNative history={history} tokens={tokens} onOpen={(entry) => void openHistory(entry)} onDelete={requestRemoval} onShowAll={() => { dismissKeyboard(); setShowDownloads(true); }} /> : null}
+              <VStack alignment="leading" spacing={12} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' })]}>
+                <SectionHeadingNative title="Compatibles" tokens={tokens} />
+                <HStack alignment="center" spacing={0} modifiers={[frame({ maxWidth: Infinity }), contentShape(shapes.rectangle()), onTapGesture(dismissKeyboard)]}>
+                  {(['youtube', 'instagram', 'facebook', 'x', 'tiktok'] as const).map((key) => <VStack key={key} alignment="center" spacing={6} modifiers={[frame({ maxWidth: Infinity })]}>
+                    <SourceIconNative source={key} tokens={tokens} size={44} />
+                    <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'caption' })}>{sourceForKey(key).label}</NativeText>
+                  </VStack>)}
+                </HStack>
+              </VStack>
+            </> : null}
           </VStack>
         </ScrollView>
         {showBar ? <VStack modifiers={[padding({ horizontal: UI.pageInset, bottom: 12 })]}>
-          <DownloadBarNative state={phase === 'downloading' ? 'downloading' : phase === 'done' ? 'done' : 'ready'} fraction={fraction} preparing={preparing} tokens={tokens} onDownload={() => void download()} onCancel={() => task.current?.cancel()} />
+          <DownloadBarNative state={phase === 'downloading' ? 'downloading' : phase === 'done' ? 'done' : 'ready'} fraction={fraction} preparing={preparing} weight={weight} tokens={tokens} onDownload={() => void download()} onCancel={() => task.current?.cancel()} />
         </VStack> : null}
+        {flight ? <FlightNative flight={flight} pageWidth={pageWidth} /> : null}
+        {removalLayer}
       </ZStack>
     </PageNative>
   );
@@ -909,14 +1063,4 @@ function OptionRowNative({ label, tokens, children }: { label: string; tokens: T
     <Spacer />
     {children}
   </HStack>;
-}
-
-// The saved file's own picture when there is one; the service mark otherwise.
-function HistoryThumbnailNative({ entry, tokens }: { entry: DownloadHistoryItem; tokens: ThemeTokens }) {
-  if (!entry.thumbnail) return <SourceIconNative source={entry.source} tokens={tokens} size={48} />;
-  return <VStack modifiers={[frame({ width: 48, height: 48 }), clipShape('roundedRectangle', 10), accessibilityHidden()]}>
-    <RNHostView>
-      <RNImage source={{ uri: entry.thumbnail }} style={{ flex: 1, backgroundColor: tokens.mode === 'dark' ? '#2A2938' : '#E4E6EC' }} resizeMode="cover" />
-    </RNHostView>
-  </VStack>;
 }

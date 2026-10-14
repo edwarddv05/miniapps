@@ -39,6 +39,7 @@ public class SuperappNativeModule: Module {
     ExpoUIView(LiquidProgressView.self)
     ExpoUIView(SkyView.self)
     ExpoUIView(SteamCupView.self)
+    ExpoUIView(TrashDropView.self)
   }
 }
 

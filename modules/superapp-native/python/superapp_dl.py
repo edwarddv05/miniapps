@@ -228,7 +228,34 @@ def quality_options(info: dict) -> list[dict]:
         width = int(item["width"]) if number(item.get("width")) else height
         short_side = min(width, height)
         options[short_side] = max(options.get(short_side, 0), height)
-    return [{"id": str(side), "label": f"{side}p", "height": options[side]} for side in sorted(options, reverse=True)]
+    return [{"id": str(side), "label": f"{side}p", "height": options[side], "sizeBytes": video_size(info, options[side])} for side in sorted(options, reverse=True)]
+
+
+def known_size(item: dict) -> int | None:
+    size = item.get("filesize") or item.get("filesize_approx")
+    return int(size) if isinstance(size, (int, float)) and size > 0 else None
+
+
+def audio_size(info: dict) -> int | None:
+    """The M4A the audio download keeps, as the download's own selector picks it."""
+    tracks = [item for item in info.get("formats") or [] if isinstance(item, dict) and item.get("vcodec") == "none" and item.get("ext") == "m4a" and is_http(item) and known_size(item)]
+    if not tracks:
+        return None
+    return known_size(max(tracks, key=lambda item: (item.get("abr") or item.get("tbr") or 0)))
+
+
+def video_size(info: dict, height: int) -> int | None:
+    """Estimated weight at one height: a file with sound when the site has one,
+    otherwise H.264 video plus the M4A it is joined with. None when unknown."""
+    at_height = [item for item in info.get("formats") or [] if isinstance(item, dict) and is_video_format(item) and number(item.get("height")) == height and ios_video_codec(item.get("vcodec")) and is_http(item) and known_size(item)]
+    muxed = [item for item in at_height if carries_audio(item) and item.get("ext") == "mp4"]
+    if muxed:
+        return max(known_size(item) for item in muxed)
+    silent = [item for item in at_height if not carries_audio(item) and str(item.get("vcodec") or "").startswith("avc1")]
+    sound = audio_size(info)
+    if not silent or not sound:
+        return None
+    return max(known_size(item) for item in silent) + sound
 
 
 def has_audio(info: dict) -> bool:
@@ -333,6 +360,7 @@ def ytdlp_analysis(url: str) -> dict:
         "aspectRatio": aspect_ratio(first),
         "modes": ytdlp_modes(first, info, detect_source(info.get("webpage_url") or url), entries is not None),
         "qualities": quality_options(first),
+        "audioSizeBytes": audio_size(first),
         "items": items,
     }
 

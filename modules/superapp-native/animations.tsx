@@ -1,5 +1,5 @@
 import { requireNativeView } from 'expo';
-import type { ComponentType, ReactNode } from 'react';
+import { useEffect, type ComponentType, type ReactNode } from 'react';
 import type { ColorValue } from 'react-native';
 import type { CommonViewModifierProps } from '@expo/ui/swift-ui';
 import { SuperappNative } from './index';
@@ -37,4 +37,17 @@ export function Sky(props: { minute: number; dark: boolean } & CommonViewModifie
 
 export function SteamCup({ color, steam, fallback, modifiers }: { color: ColorValue; steam: ColorValue; fallback: ReactNode } & CommonViewModifierProps) {
   return SteamCupNative ? <SteamCupNative color={color} steam={steam} modifiers={modifiers} /> : <>{fallback}</>;
+}
+
+const TrashDropNative = nativeView<{ image: string; trigger: number; tile: ColorValue; onFinish: () => void }>('TrashDropView');
+
+/**
+ * A deleted download falling into a bin. Each new `trigger` plays it once and
+ * calls `onFinish` at the end; without the native view it finishes at once.
+ */
+export function TrashDrop({ image, trigger, tile, onFinish, modifiers }: { image: string | null; trigger: number; tile: ColorValue; onFinish: () => void } & CommonViewModifierProps) {
+  useEffect(() => {
+    if (!TrashDropNative && trigger > 0) onFinish();
+  }, [trigger]);
+  return TrashDropNative ? <TrashDropNative image={image ?? ''} trigger={trigger} tile={tile} onFinish={onFinish} modifiers={modifiers} /> : null;
 }

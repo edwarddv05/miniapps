@@ -10,6 +10,8 @@ export type DownloadQuality = {
   id: string;
   label: string;
   height: number;
+  /** yt-dlp's estimate of the saved file; null when the site does not say. */
+  sizeBytes: number | null;
 };
 
 export type DownloadVideo = {
@@ -62,6 +64,8 @@ export type DownloadAnalysis = {
   videoCount: number;
   videos: DownloadVideo[];
   qualities: DownloadQuality[];
+  /** Estimated weight of the audio download; null when unknown. */
+  audioSizeBytes: number | null;
 };
 
 export type AudioTrack = {
@@ -96,6 +100,9 @@ export type DownloadHistoryItem = {
   uri: string;
   thumbnail: string | null;
   createdAt: number;
+  /** Measured on the iPhone after saving; older entries get it on load. */
+  sizeBytes?: number | null;
+  durationSeconds?: number | null;
 };
 
 /**
@@ -276,7 +283,9 @@ function readAnalysis(result: Record<string, unknown>): DownloadAnalysis {
     ? result.videos.filter((video): video is DownloadVideo => Boolean(video && typeof video.id === 'string' && typeof video.title === 'string' && typeof video.url === 'string'))
     : [];
   const qualities = Array.isArray(result.qualities)
-    ? result.qualities.filter((quality): quality is DownloadQuality => Boolean(quality && typeof quality.id === 'string' && typeof quality.label === 'string' && typeof quality.height === 'number'))
+    ? result.qualities.flatMap((quality) => quality && typeof quality.id === 'string' && typeof quality.label === 'string' && typeof quality.height === 'number'
+      ? [{ id: quality.id, label: quality.label, height: quality.height, sizeBytes: positive(quality.sizeBytes) }]
+      : [])
     : [];
   const items: DownloadItem[] = Array.isArray(result.items)
     ? result.items.flatMap((item) => item && typeof item.id === 'string' && typeof item.url === 'string' && (item.kind === 'video' || item.kind === 'image')
@@ -307,6 +316,7 @@ function readAnalysis(result: Record<string, unknown>): DownloadAnalysis {
     videoCount: positive(result.videoCount) ?? Math.max(items.length, videos.length, 1),
     videos,
     qualities,
+    audioSizeBytes: positive(result.audioSizeBytes),
   };
 }
 
@@ -553,6 +563,25 @@ export async function fileExists(uri: string) {
   } catch {
     return false;
   }
+}
+
+export async function fileSize(uri: string): Promise<number | null> {
+  if (Platform.OS === 'web') return null;
+  try {
+    const info = await FileSystem.getInfoAsync(uri);
+    return info.exists && !info.isDirectory ? info.size : null;
+  } catch {
+    return null;
+  }
+}
+
+/** "4,1 MB", "120 MB", "1,2 GB", "180 KB". */
+export function formatBytes(bytes: number) {
+  const mb = bytes / 1_000_000;
+  if (mb >= 1000) return `${(mb / 1000).toFixed(1).replace('.', ',')} GB`;
+  if (mb >= 10) return `${Math.round(mb)} MB`;
+  if (mb >= 1) return `${mb.toFixed(1).replace('.', ',')} MB`;
+  return `${Math.max(1, Math.round(bytes / 1000))} KB`;
 }
 
 export async function deleteLocalFile(uri: string) {

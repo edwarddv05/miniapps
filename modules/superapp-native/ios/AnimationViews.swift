@@ -1,6 +1,7 @@
 import ExpoModulesCore
 import ExpoUI
 import SwiftUI
+import UIKit
 
 // Animated pieces drawn in SwiftUI. Each one is driven by something real: a
 // value from the app (download progress, the time) or the finger.
@@ -357,6 +358,189 @@ private struct Steam: Shape {
       let x = rect.midX + sway + lean * 22 * t * t
       let y = rect.maxY - rect.height * t
       step == 0 ? path.move(to: CGPoint(x: x, y: y)) : path.addLine(to: CGPoint(x: x, y: y))
+    }
+    return path
+  }
+}
+
+// MARK: - Trash drop
+
+public final class TrashDropProps: UIBaseViewProps {
+  /// The deleted download's picture; empty draws a plain tile.
+  @Field var image: String = ""
+  /// Each change plays the drop once.
+  @Field var trigger: Int = 0
+  @Field var tile: Color = .gray
+  var onFinish = EventDispatcher()
+}
+
+/// A deleted download falls into a bin: the bin rises, opens its lid, the
+/// picture arcs in, the lid slams, the bin squashes, wobbles, puffs and sinks.
+public struct TrashDropView: ExpoSwiftUI.View {
+  @ObservedObject public var props: TrashDropProps
+  @State private var binUp = false
+  @State private var lid: Double = 0
+  @State private var squash = CGSize(width: 1, height: 1)
+  @State private var wobble: Double = 0
+  @State private var puff = false
+  @State private var showPicture = false
+  @State private var stage = 0
+  @State private var run = 0
+
+  public init(props: TrashDropProps) {
+    self.props = props
+  }
+
+  public var body: some View {
+    GeometryReader { geo in
+      let size = geo.size
+      let binCentre = CGPoint(x: size.width / 2, y: size.height - 74)
+      let mouth = CGPoint(x: binCentre.x, y: binCentre.y - 8)
+      let start = CGPoint(x: size.width / 2, y: size.height * 0.4)
+      let peak = CGPoint(x: size.width / 2 + 34, y: size.height * 0.4 - 46)
+      let place = stage == 0 ? start : stage == 1 ? peak : mouth
+      ZStack {
+        if showPicture {
+          picture
+            .frame(width: 150, height: 150)
+            .clipShape(RoundedRectangle(cornerRadius: stage == 0 ? 18 : 30, style: .continuous))
+            .shadow(color: .black.opacity(stage == 0 ? 0.35 : 0), radius: 18, y: 10)
+            .scaleEffect(stage == 0 ? 1 : stage == 1 ? 0.45 : 0.1)
+            .rotationEffect(.degrees(stage == 0 ? 0 : stage == 1 ? -14 : -32))
+            .opacity(stage == 2 ? 0.5 : 1)
+            .position(place)
+        }
+        ForEach(0..<4, id: \.self) { index in
+          let side = [-1.0, -0.45, 0.45, 1.0][index]
+          Circle()
+            .fill(Color.white.opacity(0.8))
+            .frame(width: 5, height: 5)
+            .position(x: mouth.x + side * (puff ? 30 : 14), y: mouth.y - (puff ? 12 + Double(index % 2) * 7 : 0))
+            .opacity(puff ? 0 : (stage == 3 ? 0.9 : 0))
+        }
+        Bin(lid: lid)
+          .frame(width: 46, height: 46)
+          .scaleEffect(x: squash.width, y: squash.height, anchor: .bottom)
+          .rotationEffect(.degrees(wobble), anchor: .bottom)
+          .frame(width: 78, height: 78)
+          .background(.ultraThinMaterial, in: Circle())
+          .overlay(Circle().strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
+          .shadow(color: .black.opacity(0.3), radius: 14, y: 8)
+          .position(x: binCentre.x, y: binCentre.y + (binUp ? 0 : 190))
+      }
+    }
+    .allowsHitTesting(false)
+    .accessibilityHidden(true)
+    .onAppear { if props.trigger > 0 { play() } }
+    .onChange(of: props.trigger) { _ in play() }
+  }
+
+  @ViewBuilder private var picture: some View {
+    if let url = URL(string: props.image), !props.image.isEmpty {
+      AsyncImage(url: url) { image in
+        image.resizable().scaledToFill()
+      } placeholder: {
+        props.tile
+      }
+    } else {
+      props.tile
+    }
+  }
+
+  private func play() {
+    run += 1
+    let current = run
+    var still = Transaction()
+    still.disablesAnimations = true
+    withTransaction(still) {
+      binUp = false
+      lid = 0
+      squash = CGSize(width: 1, height: 1)
+      wobble = 0
+      puff = false
+      stage = 0
+      showPicture = true
+    }
+    let later = { (delay: Double, step: @escaping () -> Void) in
+      DispatchQueue.main.asyncAfter(deadline: .now() + delay) { if current == run { step() } }
+    }
+    later(0.02) { withAnimation(.spring(response: 0.42, dampingFraction: 0.68)) { binUp = true } }
+    later(0.3) { withAnimation(.spring(response: 0.26, dampingFraction: 0.55)) { lid = 1 } }
+    later(0.46) { withAnimation(.easeOut(duration: 0.24)) { stage = 1 } }
+    later(0.7) { withAnimation(.easeIn(duration: 0.24)) { stage = 2 } }
+    later(0.94) {
+      showPicture = false
+      stage = 3
+      withAnimation(.easeIn(duration: 0.1)) { lid = 0 }
+    }
+    later(1.04) {
+      UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+      withAnimation(.easeOut(duration: 0.08)) { squash = CGSize(width: 1.14, height: 0.84) }
+      withAnimation(.easeOut(duration: 0.45)) { puff = true }
+    }
+    later(1.12) {
+      withAnimation(.spring(response: 0.3, dampingFraction: 0.45)) { squash = CGSize(width: 1, height: 1) }
+      wobble = -8
+      withAnimation(.spring(response: 0.36, dampingFraction: 0.25)) { wobble = 0 }
+    }
+    later(1.85) { withAnimation(.easeIn(duration: 0.28)) { binUp = false } }
+    later(2.15) {
+      stage = 0
+      props.onFinish()
+    }
+  }
+}
+
+/// A bin whose lid hinges on its right end.
+private struct Bin: View {
+  var lid: Double
+
+  var body: some View {
+    ZStack(alignment: .top) {
+      BinBody()
+        .fill(LinearGradient(colors: [Color(white: 0.9), Color(white: 0.76), Color(white: 0.62)], startPoint: .leading, endPoint: .trailing))
+        .overlay(BinRibs().stroke(Color.black.opacity(0.22), style: StrokeStyle(lineWidth: 1.6, lineCap: .round)))
+        .frame(width: 22, height: 24)
+        .offset(y: 19)
+      VStack(spacing: -1.5) {
+        RoundedRectangle(cornerRadius: 1.8)
+          .strokeBorder(Color(white: 0.86), lineWidth: 2)
+          .frame(width: 9, height: 6)
+        Capsule()
+          .fill(Color(white: 0.93))
+          .frame(width: 26, height: 4.4)
+      }
+      .frame(width: 26, height: 9)
+      .rotationEffect(.degrees(-112 * lid), anchor: .bottomTrailing)
+      .offset(x: 2 * lid, y: 9.5 - 2 * lid)
+    }
+    .frame(width: 46, height: 46, alignment: .top)
+  }
+}
+
+private struct BinBody: Shape {
+  func path(in rect: CGRect) -> Path {
+    let inset = rect.width * 0.1
+    var path = Path()
+    path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+    path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+    path.addLine(to: CGPoint(x: rect.maxX - inset, y: rect.maxY - 3))
+    path.addQuadCurve(to: CGPoint(x: rect.maxX - inset - 3, y: rect.maxY), control: CGPoint(x: rect.maxX - inset, y: rect.maxY))
+    path.addLine(to: CGPoint(x: rect.minX + inset + 3, y: rect.maxY))
+    path.addQuadCurve(to: CGPoint(x: rect.minX + inset, y: rect.maxY - 3), control: CGPoint(x: rect.minX + inset, y: rect.maxY))
+    path.closeSubpath()
+    return path
+  }
+}
+
+private struct BinRibs: Shape {
+  func path(in rect: CGRect) -> Path {
+    var path = Path()
+    for fraction in [0.3, 0.5, 0.7] {
+      let x = rect.minX + rect.width * fraction
+      let lean = (fraction - 0.5) * rect.width * 0.08
+      path.move(to: CGPoint(x: x, y: rect.minY + 4))
+      path.addLine(to: CGPoint(x: x - lean, y: rect.maxY - 4))
     }
     return path
   }
