@@ -343,10 +343,11 @@ function AmbientGlowNative({ color, tokens }: { color: string; tokens: ThemeToke
   </ZStack>;
 }
 
-export function PageNative({ title, subtitle, tokens, onBack, backLabel, titleOpacity, action, onHeaderTap, ambient, settings, children }: { title: string; subtitle?: string; tokens: ThemeTokens; onBack?: () => void; backLabel?: string; titleOpacity?: number; action?: ReactNode; onHeaderTap?: () => void; ambient?: string | null; settings?: ReactNode; children: ReactNode }) {
+export function PageNative({ title, subtitle, tokens, onBack, backLabel, titleOpacity, action, onHeaderTap, ambient, backdrop, settings, children }: { title: string; subtitle?: string; tokens: ThemeTokens; onBack?: () => void; backLabel?: string; titleOpacity?: number; action?: ReactNode; onHeaderTap?: () => void; ambient?: string | null; backdrop?: ReactNode; settings?: ReactNode; children: ReactNode }) {
   return <ZStack alignment="topLeading" modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity, alignment: 'topLeading' })]}>
     {/* Ground and glow run under the status bar so the clock and icons sit on the page's own colour. */}
     <ZStack alignment="topLeading" modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity, alignment: 'topLeading' }), background(tokens.background), ignoreSafeArea({ edges: 'top' })]}>
+      {backdrop ?? null}
       {ambient ? <AmbientGlowNative color={ambient} tokens={tokens} /> : null}
     </ZStack>
     <PageBodyNative title={title} subtitle={subtitle} tokens={tokens} onBack={onBack} backLabel={backLabel} titleOpacity={titleOpacity} action={action} onHeaderTap={onHeaderTap} settings={settings}>{children}</PageBodyNative>

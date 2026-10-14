@@ -148,144 +148,132 @@ private struct Bubbles: Shape {
 public final class SkyProps: UIBaseViewProps {
   /// Minutes since midnight.
   @Field var minute: Double = 720
-  @Field var dark: Bool = false
-  @Field var color: Color = .orange
-  @Field var line: Color = .gray
-  @Field var text: Color = .secondary
+  @Field var dark: Bool = true
 }
 
-/// The day as an arc: the sun crosses it from sunrise to sunset, the moon at
-/// night. Dragging moves it through the day and shows the hour under the finger.
+/// Hoy's backdrop: a glow from the top of the screen in the colour the sky has
+/// at this minute, with the sun (or the moon and stars) sitting in it between
+/// the title and the header button, drifting left to right through the day.
 public struct SkyView: ExpoSwiftUI.View {
   @ObservedObject public var props: SkyProps
-  @State private var scrub: Double?
-  @State private var sideways: Bool?
-
-  private let sunrise = 6.0 * 60
-  private let sunset = 18.5 * 60
 
   public init(props: SkyProps) {
     self.props = props
   }
 
   public var body: some View {
-    GeometryReader { proxy in
-      let size = proxy.size
-      let minute = scrub ?? props.minute
-      let day = minute >= sunrise && minute < sunset
-      // 0 at the left horizon, 1 at the right one.
-      let along = day
-        ? (minute - sunrise) / (sunset - sunrise)
-        : (minute >= sunset ? minute - sunset : minute + 1440 - sunset) / (1440 - (sunset - sunrise))
-      let point = arcPoint(along, in: size)
-
-      TimelineView(.animation(minimumInterval: 1 / 30)) { timeline in
-        let time = timeline.date.timeIntervalSinceReferenceDate
-        ZStack(alignment: .topLeading) {
-          if !day { stars(time: time, in: size) }
-          Arc().stroke(props.line, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: [2, 6]))
-          // The travelled part of the arc.
-          Arc().trim(from: 0, to: along).stroke(props.color.opacity(0.55), style: StrokeStyle(lineWidth: 2, lineCap: .round))
-          Rectangle().fill(props.line).frame(height: 1).offset(y: size.height - 0.5)
-          orb(day: day, time: time)
-            .position(point)
-          if let scrub {
-            Text(clock(scrub))
-              .font(.caption.weight(.semibold).monospacedDigit())
-              .foregroundStyle(props.text)
-              .position(x: min(max(point.x, 22), size.width - 22), y: size.height + 12)
-          }
-        }
+    TimelineView(.animation(minimumInterval: 1 / 20)) { timeline in
+      let time = timeline.date.timeIntervalSinceReferenceDate
+      Canvas { context, size in
+        Sky.draw(in: &context, size: size, minute: props.minute, time: time, dark: props.dark)
       }
-      .contentShape(Rectangle())
-      // Simultaneous so the page still scrolls; only sideways drags scrub.
-      .simultaneousGesture(
-        DragGesture(minimumDistance: 10)
-          .onChanged { value in
-            if sideways == nil { sideways = abs(value.translation.width) > abs(value.translation.height) }
-            guard sideways == true else { return }
-            let fraction = min(1, max(0, value.location.x / max(size.width, 1)))
-            let next = day
-              ? sunrise + fraction * (sunset - sunrise)
-              : (sunset + fraction * (1440 - (sunset - sunrise))).truncatingRemainder(dividingBy: 1440)
-            if scrub == nil { UISelectionFeedbackGenerator().selectionChanged() }
-            withAnimation(.interactiveSpring(response: 0.25, dampingFraction: 0.8)) { scrub = next }
-          }
-          .onEnded { _ in
-            sideways = nil
-            withAnimation(.spring(response: 0.6, dampingFraction: 0.62)) { scrub = nil }
-          }
-      )
     }
-    .padding(.bottom, 18)
+    .allowsHitTesting(false)
     .accessibilityHidden(true)
-  }
-
-  @ViewBuilder
-  private func orb(day: Bool, time: Double) -> some View {
-    if day {
-      ZStack {
-        Circle().fill(props.color.opacity(0.22)).frame(width: 46, height: 46).scaleEffect(1 + 0.08 * sin(time * 1.6))
-        ForEach(0..<8, id: \.self) { ray in
-          Capsule()
-            .fill(props.color)
-            .frame(width: 2.5, height: 6)
-            .offset(y: -16)
-            .rotationEffect(.degrees(Double(ray) * 45 + time * 12))
-        }
-        Circle().fill(props.color).frame(width: 20, height: 20)
-      }
-    } else {
-      ZStack {
-        Circle().fill(props.color.opacity(0.16)).frame(width: 40, height: 40)
-        Image(systemName: "moon.fill")
-          .font(.system(size: 20, weight: .semibold))
-          .foregroundStyle(props.color)
-          .rotationEffect(.degrees(-20 + 4 * sin(time * 0.8)))
-      }
-    }
-  }
-
-  private func stars(time: Double, in size: CGSize) -> some View {
-    ZStack(alignment: .topLeading) {
-      ForEach(0..<14, id: \.self) { index in
-        let seed = Double(index)
-        let x = (sin(seed * 12.9898) * 43758.5453).truncatingRemainder(dividingBy: 1)
-        let y = (sin(seed * 78.233) * 12345.6789).truncatingRemainder(dividingBy: 1)
-        Circle()
-          .fill(props.text)
-          .frame(width: index % 4 == 0 ? 3 : 2, height: index % 4 == 0 ? 3 : 2)
-          .opacity(0.25 + 0.35 * (0.5 + 0.5 * sin(time * (1 + seed * 0.13) + seed)))
-          .position(x: abs(x) * size.width, y: abs(y) * size.height * 0.85)
-      }
-    }
-  }
-
-  private func arcPoint(_ along: Double, in size: CGSize) -> CGPoint {
-    let angle = Double.pi * (1 - along)
-    let radiusX = size.width / 2 - 12
-    let radiusY = size.height - 14
-    return CGPoint(x: size.width / 2 + radiusX * cos(angle), y: size.height - radiusY * sin(angle))
-  }
-
-  private func clock(_ minute: Double) -> String {
-    let total = Int(minute.rounded()) % 1440
-    return String(format: "%02d:%02d", total / 60, total % 60)
   }
 }
 
-private struct Arc: Shape {
-  func path(in rect: CGRect) -> Path {
-    var path = Path()
-    let radiusX = rect.width / 2 - 12
-    let radiusY = rect.height - 14
-    let steps = 60
-    for step in 0...steps {
-      let angle = Double.pi * (1 - Double(step) / Double(steps))
-      let point = CGPoint(x: rect.midX + radiusX * cos(angle), y: rect.maxY - radiusY * sin(angle))
-      step == 0 ? path.move(to: point) : path.addLine(to: point)
+private enum Sky {
+  static let sunrise = 6.0 * 60
+  static let sunset = 18.5 * 60
+
+  // The sky through the day: minute, glow, the deeper colour it fades into.
+  static let keys: [(Double, UInt32, UInt32)] = [
+    (0, 0x1B2A6B, 0x0D1330), (300, 0x1F2A66, 0x141A3C), (360, 0xE2765A, 0x6B3F63),
+    (450, 0xF0A35C, 0xC9744E), (720, 0xF2B34F, 0xE39A3F), (1020, 0xF08F3C, 0xD9643C),
+    (1110, 0xD9546F, 0x7A3767), (1190, 0x4B3A86, 0x22204F), (1290, 0x1B2A6B, 0x0D1330), (1440, 0x1B2A6B, 0x0D1330),
+  ]
+
+  static func draw(in context: inout GraphicsContext, size: CGSize, minute: Double, time: Double, dark: Bool) {
+    let (glow, deep) = colours(at: minute)
+    let night = nightness(minute)
+    let day = minute >= sunrise && minute < sunset
+    let along = day ? (minute - sunrise) / (sunset - sunrise)
+      : (minute >= sunset ? minute - sunset : minute + 1440 - sunset) / (1440 - (sunset - sunrise))
+    let point = CGPoint(x: size.width * (0.4 + 0.36 * along), y: 88 - 16 * sin(.pi * along))
+    let strength = dark ? 1.0 : 0.7
+
+    // The glow, centred on the sun so the light comes from it.
+    let reach = size.width * 0.95
+    context.fill(Path(CGRect(origin: .zero, size: size)), with: .radialGradient(
+      Gradient(stops: [
+        .init(color: glow.opacity((0.5 - 0.15 * night) * strength), location: 0),
+        .init(color: deep.opacity(0.22 * strength), location: 0.45),
+        .init(color: deep.opacity(0), location: 1),
+      ]),
+      center: point, startRadius: 0, endRadius: reach))
+
+    if night > 0 && dark { stars(in: &context, size: size, time: time, alpha: night) }
+    if day { sun(in: &context, at: point, time: time, glow: glow, strength: strength) } else { moon(in: &context, at: point, dark: dark) }
+  }
+
+  static func colours(at minute: Double) -> (Color, Color) {
+    for index in 0..<(keys.count - 1) {
+      let (m0, g0, d0) = keys[index]
+      let (m1, g1, d1) = keys[index + 1]
+      if minute >= m0 && minute <= m1 {
+        let t = (minute - m0) / (m1 - m0)
+        return (mix(g0, g1, t), mix(d0, d1, t))
+      }
     }
-    return path
+    return (mix(0x1B2A6B, 0x1B2A6B, 0), mix(0x0D1330, 0x0D1330, 0))
+  }
+
+  static func mix(_ a: UInt32, _ b: UInt32, _ t: Double) -> Color {
+    func channel(_ value: UInt32, _ shift: UInt32) -> Double { Double((value >> shift) & 0xFF) / 255 }
+    let blend = { (shift: UInt32) in channel(a, shift) + (channel(b, shift) - channel(a, shift)) * t }
+    return Color(red: blend(16), green: blend(8), blue: blend(0))
+  }
+
+  /// 0 by day, 1 at night, easing over the hour around sunrise and sunset.
+  static func nightness(_ minute: Double) -> Double {
+    let edge = 50.0
+    if minute >= sunrise + edge && minute <= sunset - edge { return 0 }
+    if minute < sunrise - edge || minute > sunset + edge { return 1 }
+    let value = minute < 720 ? (sunrise + edge - minute) / (edge * 2) : (minute - (sunset - edge)) / (edge * 2)
+    return min(1, max(0, value))
+  }
+
+  static func sun(in context: inout GraphicsContext, at point: CGPoint, time: Double, glow: Color, strength: Double) {
+    let radius = 11.0
+    let halo = radius * 3.2
+    context.fill(Path(ellipseIn: CGRect(x: point.x - halo, y: point.y - halo, width: halo * 2, height: halo * 2)), with: .radialGradient(
+      Gradient(colors: [glow.opacity(0.55 * strength), glow.opacity(0)]), center: point, startRadius: radius * 0.4, endRadius: halo))
+    var rays = context
+    rays.translateBy(x: point.x, y: point.y)
+    rays.rotate(by: .radians(time * 0.12))
+    for _ in 0..<8 {
+      rays.rotate(by: .degrees(45))
+      rays.fill(Path(roundedRect: CGRect(x: -1.4, y: -radius - 9, width: 2.8, height: 6), cornerRadius: 1.4), with: .color(Color(red: 1, green: 0.78, blue: 0.35).opacity(0.95)))
+    }
+    context.fill(Path(ellipseIn: CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)), with: .color(Color(red: 1, green: 0.71, blue: 0.23)))
+  }
+
+  static func moon(in context: inout GraphicsContext, at point: CGPoint, dark: Bool) {
+    let radius = 10.0
+    let halo = radius * 3
+    let light = dark ? Color(red: 0.91, green: 0.92, blue: 0.96) : Color(red: 0.45, green: 0.48, blue: 0.6)
+    context.fill(Path(ellipseIn: CGRect(x: point.x - halo, y: point.y - halo, width: halo * 2, height: halo * 2)), with: .radialGradient(
+      Gradient(colors: [Color(red: 0.78, green: 0.82, blue: 1).opacity(dark ? 0.28 : 0.18), .clear]), center: point, startRadius: radius * 0.5, endRadius: halo))
+    // A crescent: the disc with an offset disc cut out of it.
+    context.drawLayer { layer in
+      layer.fill(Path(ellipseIn: CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)), with: .color(light))
+      layer.blendMode = .destinationOut
+      let cut = radius * 0.85
+      layer.fill(Path(ellipseIn: CGRect(x: point.x + radius * 0.45 - cut, y: point.y - radius * 0.3 - cut, width: cut * 2, height: cut * 2)), with: .color(.black))
+    }
+  }
+
+  static func stars(in context: inout GraphicsContext, size: CGSize, time: Double, alpha: Double) {
+    for index in 0..<26 {
+      let seed = Double(index)
+      let x = abs((sin(seed * 12.9898) * 43758.5453).truncatingRemainder(dividingBy: 1))
+      let y = abs((sin(seed * 78.233) * 12345.678).truncatingRemainder(dividingBy: 1))
+      let radius = index % 5 == 0 ? 1.6 : 1.0
+      let twinkle = 0.35 + 0.4 * (0.5 + 0.5 * sin(time * 1.3 + seed * 1.7))
+      let center = CGPoint(x: x * size.width, y: 50 + y * 150)
+      context.fill(Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)), with: .color(Color(red: 0.92, green: 0.94, blue: 1).opacity(alpha * twinkle)))
+    }
   }
 }
 

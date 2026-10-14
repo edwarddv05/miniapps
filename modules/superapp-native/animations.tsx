@@ -15,7 +15,7 @@ function nativeView<P>(name: string): Native<P> | null {
 
 const PopInNative = nativeView<{ trigger: number }>('PopInView');
 const LiquidProgressNative = nativeView<{ progress: number; color: ColorValue }>('LiquidProgressView');
-const SkyNative = nativeView<{ minute: number; dark: boolean; color: ColorValue; line: ColorValue; text: ColorValue }>('SkyView');
+const SkyNative = nativeView<{ minute: number; dark: boolean }>('SkyView');
 const SteamCupNative = nativeView<{ color: ColorValue; steam: ColorValue }>('SteamCupView');
 
 export const animationsAvailable = Boolean(SuperappNative);
@@ -30,8 +30,8 @@ export function LiquidProgress({ progress, color, fallback, modifiers }: { progr
   return LiquidProgressNative ? <LiquidProgressNative progress={progress} color={color} modifiers={modifiers} /> : <>{fallback}</>;
 }
 
-/** The day's arc with the sun or moon at the current minute. */
-export function Sky(props: { minute: number; dark: boolean; color: ColorValue; line: ColorValue; text: ColorValue } & CommonViewModifierProps) {
+/** The page's top glow in the colour of the sky at this minute, with the sun or moon in it. */
+export function Sky(props: { minute: number; dark: boolean } & CommonViewModifierProps) {
   return SkyNative ? <SkyNative {...props} /> : null;
 }
 
