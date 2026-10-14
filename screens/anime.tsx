@@ -2,7 +2,7 @@
 
 import * as Haptics from 'expo-haptics';
 import { BottomSheet, Button as NativeButton, ContentUnavailableView, Divider, Group, HStack, Menu, Image as NativeImage, LazyVStack, Picker, ProgressView, RNHostView, ScrollView, Spacer, Text as NativeText, TextField, type TextFieldRef, VStack, ZStack, useNativeState } from '@expo/ui/swift-ui';
-import { accessibilityLabel, accessibilityAddTraits, accessibilityElement, accessibilityHidden, accessibilityHint, animation, Animation, blur, clipped, buttonStyle, clipShape, contentShape, contentTransition, controlSize, disabled, font, fixedSize, frame, glassEffect, ignoreSafeArea, autocorrectionDisabled, lineLimit, menuIndicator, minimumScaleFactor, monospacedDigit, multilineTextAlignment, onSubmit, offset, onAppear, useScrollGeometryChange, onLongPressGesture, onTapGesture, opacity, padding, pickerStyle, presentationDetents, presentationDragIndicator, scaleEffect, scrollDismissesKeyboard, shadow, shapes, submitLabel, tag, textFieldStyle, type ViewModifier } from '@expo/ui/swift-ui/modifiers';
+import { refreshable, accessibilityLabel, accessibilityAddTraits, accessibilityElement, accessibilityHidden, accessibilityHint, animation, Animation, blur, clipped, buttonStyle, clipShape, contentShape, contentTransition, controlSize, disabled, font, fixedSize, frame, glassEffect, ignoreSafeArea, autocorrectionDisabled, lineLimit, menuIndicator, minimumScaleFactor, monospacedDigit, multilineTextAlignment, onSubmit, offset, onAppear, useScrollGeometryChange, onLongPressGesture, onTapGesture, opacity, padding, pickerStyle, presentationDetents, presentationDragIndicator, scaleEffect, scrollDismissesKeyboard, shadow, shapes, submitLabel, tag, textFieldStyle, type ViewModifier } from '@expo/ui/swift-ui/modifiers';
 import type { SFSymbol } from 'sf-symbols-typescript';
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, AppState, Image as RNImage, Linking, StyleSheet, useWindowDimensions, View } from 'react-native';
@@ -14,7 +14,6 @@ import { background as shapeBackground } from '@expo/ui/swift-ui/modifiers';
 import { activeFilterCount, ANIME_GENRES, animeErrorMessage, animeTitle, cachedTranslation, currentAnimeSeason, DEFAULT_ANIME_FILTERS, FORMAT_LABELS, formatFuzzyDate, genreLabel, getAnime, loadAnimeFilters, saveAnimeFilters, SEASON_LABELS, searchAnime, SORT_LABELS, STATUS_LABELS, translateSynopsis, type AnimeDetail, type AnimeFilters, type AnimeFormat, type AnimeSeason, type AnimeSort, type AnimeStatus, type AnimeSummary, type StreamingService } from '../anime-api';
 import { countryFlag, countryName, loadStreamingCountry, saveStreamingCountry, STREAMING_COUNTRIES, streamingIn } from '../justwatch-api';
 import { airedEpisodes, episodesBehind, LIST_STATUS_LABELS, loadLibrary, refreshLibrary, setListStatus, setProgress, updateLibrarySnapshot, watchableEpisodes, useAnimeLibrary, type LibraryEntry, type ListStatus } from '../anime-library';
-import { PullRefresh } from '../modules/superapp-native/animations';
 import { CHIP_GAP, CIRCLE_CONTROL_SIZE, type FilterChip, FilterChipsNative, NativeCircleButton, PageNative, SHEET_ACTION_INSET, SectionHeadingNative, StoreErrorNative, SymbolImage, type ThemeTokens, alertUnsaved, capitalize, darken, mixHex, nativeGlassAvailable, textModifiers, usePageWidth, withAlpha } from './shared';
 
 const ANIME_COLUMNS = 3;
@@ -597,12 +596,6 @@ function MyListNative({ tokens, tab, onTabChange, onBack, onExplore, onOpen }: {
   useEffect(() => {
     void refreshLibrary();
   }, []);
-  const [pulling, setPulling] = useState(false);
-  const pullRefresh = () => {
-    setPulling(true);
-    // Short enough to read as done even when nothing needed asking for.
-    void Promise.all([refreshLibrary(true), new Promise((done) => setTimeout(done, 700))]).finally(() => setPulling(false));
-  };
 
   const of = (status: ListStatus) => library.entries.filter((entry) => entry.status === status);
   const facts = (anime: AnimeSummary) => [anime.format ? FORMAT_LABELS[anime.format] : null, anime.seasonYear ?? anime.startDate?.year ?? null, anime.score ? `★ ${scoreLabel(anime.score)}` : null].filter(Boolean).join(' · ');
@@ -632,9 +625,7 @@ function MyListNative({ tokens, tab, onTabChange, onBack, onExplore, onOpen }: {
   const empty = tab === 'watching' ? !of('watching').length : !sections.some((section) => section.rows.length);
 
   return <PageNative title="Anime" tokens={tokens} onBack={onBack} action={<NativeCircleButton tokens={tokens} label="Explorar" systemName="magnifyingglass" onPress={onExplore} />}>
-    <ScrollView modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity })]}>
-      <VStack alignment="center" spacing={0}>
-      <PullRefresh refreshing={pulling} color={tokens.sage} onRefresh={pullRefresh} />
+    <ScrollView modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity }), refreshable(() => refreshLibrary(true))]}>
       <VStack alignment="leading" spacing={24} modifiers={[frame({ width: pageWidth, alignment: 'leading' }), padding({ horizontal: UI.pageInset, top: 0, bottom: 40 })]}>
         <Picker selection={tab} onSelectionChange={(value) => setTab(value as ListStatus)} modifiers={[pickerStyle('segmented'), frame({ maxWidth: Infinity }), accessibilityLabel('Lista')]}>
           {LIST_ORDER.map((status) => {
@@ -648,7 +639,6 @@ function MyListNative({ tokens, tab, onTabChange, onBack, onExplore, onOpen }: {
           : empty ? <ContentUnavailableView title={tab === 'watching' ? 'Nada en curso' : tab === 'planning' ? 'Nada pendiente' : 'Nada terminado'} systemImage={LIST_SYMBOLS[tab]} modifiers={[frame({ maxWidth: Infinity }), padding({ vertical: 48 })]} />
           : tab === 'watching' ? <WatchingBoardNative entries={of('watching')} tokens={tokens} now={now} width={pageWidth} onOpen={onOpen} onAdvance={(entry) => void advance(entry)} />
           : sections.map((section) => <LibrarySectionNative key={section.title} title={section.title} rows={section.rows} tokens={tokens} onOpen={onOpen} onAdvance={section.advance ? (entry) => void advance(entry) : undefined} />)}
-      </VStack>
       </VStack>
     </ScrollView>
   </PageNative>;

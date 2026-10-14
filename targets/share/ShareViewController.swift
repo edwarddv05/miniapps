@@ -2,8 +2,7 @@ import UIKit
 import UniformTypeIdentifiers
 
 /// "Downloader" in the share sheet: takes the shared link and opens the app on
-/// the Downloader, which downloads it with the default format. Downloading
-/// happens in the app because an extension is stopped as soon as it closes.
+/// the Downloader, which analyses it and waits for the owner to download.
 final class ShareViewController: UIViewController {
   override func viewDidAppear(_ animated: Bool) {
     super.viewDidAppear(animated)

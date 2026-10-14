@@ -17,7 +17,6 @@ const PopInNative = nativeView<{ trigger: number }>('PopInView');
 const LiquidProgressNative = nativeView<{ progress: number; color: ColorValue }>('LiquidProgressView');
 const SkyNative = nativeView<{ minute: number; dark: boolean; color: ColorValue; line: ColorValue; text: ColorValue }>('SkyView');
 const SteamCupNative = nativeView<{ color: ColorValue; steam: ColorValue }>('SteamCupView');
-const PullRefreshNative = nativeView<{ refreshing: boolean; color: ColorValue; onRefresh: () => void }>('PullRefreshView');
 
 export const animationsAvailable = Boolean(SuperappNative);
 
@@ -38,9 +37,4 @@ export function Sky(props: { minute: number; dark: boolean; color: ColorValue; l
 
 export function SteamCup({ color, steam, fallback, modifiers }: { color: ColorValue; steam: ColorValue; fallback: ReactNode } & CommonViewModifierProps) {
   return SteamCupNative ? <SteamCupNative color={color} steam={steam} modifiers={modifiers} /> : <>{fallback}</>;
-}
-
-/** Goes first in a scroll view's content: pulling down past it asks for a refresh. */
-export function PullRefresh({ refreshing, color, onRefresh }: { refreshing: boolean; color: ColorValue; onRefresh: () => void }) {
-  return PullRefreshNative ? <PullRefreshNative refreshing={refreshing} color={color} onRefresh={onRefresh} /> : null;
 }

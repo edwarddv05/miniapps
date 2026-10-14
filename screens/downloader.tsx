@@ -635,7 +635,6 @@ export function DownloaderNative({ tokens, dataSaver, onDataSaverChange, onBack,
   const [history, setHistory] = useState<DownloadHistoryItem[]>([]);
   const analyzeController = useRef<AbortController | null>(null);
   // A shared link downloads as soon as its analysis is ready, with the default format.
-  const autoDownload = useRef(false);
   const task = useRef<DownloadTask | null>(null);
   const doneTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const source = detectDownloadSource(url);
@@ -765,19 +764,10 @@ export function DownloaderNative({ tokens, dataSaver, onDataSaverChange, onBack,
       setError('Termina o cancela la descarga actual para abrir el enlace compartido.');
       return;
     }
+    // A shared link is analysed; downloading stays the owner's choice.
     reset(sharedLink.url);
-    autoDownload.current = true;
     void analyze(sharedLink.url);
   }, [sharedLink?.nonce]);
-
-  useEffect(() => {
-    if (phase === 'ready' && autoDownload.current) {
-      autoDownload.current = false;
-      void download();
-    } else if (phase === 'idle') {
-      autoDownload.current = false;
-    }
-  }, [phase]);
 
   const removeHistory = async (entry: DownloadHistoryItem) => {
     await deleteLocalFile(entry.uri);
