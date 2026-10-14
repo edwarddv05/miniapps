@@ -20,6 +20,12 @@ rm -rf build/app_packages
   --target build/app_packages -r python/requirements.txt
 rm -rf build/app_packages/bin build/app_packages/share
 
+# Parts of the standard library a downloader never imports (the tests also
+# contain files with deliberate syntax errors).
+for unused in test idlelib tkinter turtledemo ensurepip lib2to3 pydoc_data venv; do
+  rm -rf ios/Python.xcframework/lib/python$PYTHON_MINOR/$unused
+done
+
 # Byte-code compiled ahead of time: the app cannot write caches next to its
 # sources, and yt-dlp would otherwise be recompiled on every launch.
-"$HOST_PYTHON" -m compileall -q -j 0 --invalidation-mode unchecked-hash build/app_packages python ios/Python.xcframework/lib > /dev/null
+"$HOST_PYTHON" -m compileall -q -j 0 --invalidation-mode unchecked-hash build/app_packages python ios/Python.xcframework/lib
