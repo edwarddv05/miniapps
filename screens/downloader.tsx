@@ -14,7 +14,7 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { UI } from '../ui-structure';
 import { analyzeUrl, checkDownloader, LOCAL_DOWNLOADER, downloaderUrl, loadDownloaderUrl, normalizeServerUrl, saveDownloaderUrl, deleteLocalFile, detectDownloadSource, DownloadCancelledError, downloaderErrorMessage, fileExists, formatDuration, loadDownloadHistory, saveDownloadHistory, shareFile, sourceForKey, startDownload, type DownloadAnalysis, type DownloadHistoryItem, type DownloadItem, type DownloadMode, type DownloadTask, type SourceKey } from '../downloader-api';
 import { background, foregroundStyle, tint } from '../native-colors';
-import { NativeCircleButton, PageNative, alertUnsaved, SectionHeadingNative, SymbolImage, type ThemeTokens, makeId, nativeGlassAvailable, textModifiers, usePageWidth } from './shared';
+import { PageNative, alertUnsaved, SectionHeadingNative, SymbolImage, type ThemeTokens, makeId, nativeGlassAvailable, textModifiers, usePageWidth } from './shared';
 
 const BRAND_ICONS: Record<Exclude<SourceKey, 'other'>, { glyph: string; background: string; foreground: string }> = {
   youtube: { glyph: 'youtube', background: '#FF0033', foreground: '#FFFFFF' },
@@ -93,6 +93,34 @@ function PlayerGlyph({ name, icons, size }: { name: PlayerIcon; icons: Record<Pl
   return icons
     ? <NativeImage uiImage={icons[name]} modifiers={[resizable(), frame({ width: size, height: size }), accessibilityHidden()]} />
     : <NativeImage systemName={PLAYER_ICON_FALLBACK[name]} modifiers={[font({ size: size * 0.85, weight: 'semibold' }), foregroundStyle('#FFFFFF'), accessibilityHidden()]} />;
+}
+
+type FieldAction = 'paste' | 'clear' | 'analyze' | 'busy' | 'none';
+
+// The bar's trailing control, drawn as a glyph inside the field like Safari's
+// address bar: paste when empty, clear while editing or once analysed, send
+// when a typed link is waiting.
+function fieldAction(url: string, focused: boolean, phase: string, analysed: boolean): { action: FieldAction } {
+  if (phase === 'analyzing') return { action: 'busy' };
+  if (phase === 'downloading') return { action: 'none' };
+  if (!url.trim()) return { action: 'paste' };
+  if (focused || analysed) return { action: 'clear' };
+  return { action: 'analyze' };
+}
+
+function FieldActionNative({ tokens, action, onPaste, onClear, onAnalyze }: { tokens: ThemeTokens; action: FieldAction; onPaste: () => void; onClear: () => void; onAnalyze: () => void }) {
+  if (action === 'none') return null;
+  if (action === 'busy') return <ZStack alignment="center" modifiers={[frame({ width: 40, height: 40 })]}><ProgressView modifiers={[controlSize('small')]} /></ZStack>;
+  const glyph = action === 'paste'
+    ? { name: 'doc.on.clipboard' as const, color: tokens.secondary, size: 19, label: 'Pegar enlace', press: onPaste }
+    : action === 'clear'
+      ? { name: 'xmark.circle.fill' as const, color: tokens.muted, size: 20, label: 'Borrar enlace', press: onClear }
+      : { name: 'arrow.up.circle.fill' as const, color: tokens.blue, size: 30, label: 'Analizar enlace', press: onAnalyze };
+  return <NativeButton onPress={glyph.press} modifiers={[buttonStyle('plain'), accessibilityLabel(glyph.label)]}>
+    <ZStack alignment="center" modifiers={[frame({ width: 40, height: 40 }), contentShape(shapes.rectangle())]}>
+      <NativeImage systemName={glyph.name} modifiers={[font({ size: glyph.size, weight: 'medium' }), foregroundStyle(glyph.color), accessibilityHidden()]} />
+    </ZStack>
+  </NativeButton>;
 }
 
 const PLAYER_TEXT = '#FFFFFF';
@@ -589,6 +617,7 @@ export function DownloaderNative({ tokens, dataSaver, onDataSaverChange, onBack,
   const urlState = useNativeState('');
   const urlRef = useRef('');
   const urlInput = useRef<TextFieldRef>(null);
+  const [urlFocused, setUrlFocused] = useState(false);
   const dismissKeyboard = () => void urlInput.current?.blur();
   const [url, setUrl] = useState('');
   const [phase, setPhase] = useState<'idle' | 'analyzing' | 'ready' | 'downloading' | 'done'>('idle');
@@ -778,14 +807,10 @@ export function DownloaderNative({ tokens, dataSaver, onDataSaverChange, onBack,
         <ScrollView modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity }), scrollDismissesKeyboard('immediately')]}>
           <VStack alignment="leading" spacing={20} modifiers={[frame({ width: pageWidth, alignment: 'leading' }), padding({ horizontal: UI.pageInset, top: 0, bottom: showBar ? BAR_HEIGHT + 48 : 32 })]}>
             {/* The link is a floating glass search bar, like Safari's address field. */}
-            <HStack alignment="center" spacing={10} modifiers={[frame({ maxWidth: Infinity, minHeight: 54 }), padding({ leading: 10, trailing: 5 }), ...(nativeGlassAvailable ? [glassEffect({ glass: { variant: 'regular' }, shape: 'capsule' })] : [background(tokens.surface), clipShape('capsule')])]}>
+            <HStack alignment="center" spacing={10} modifiers={[frame({ maxWidth: Infinity, minHeight: 54 }), padding({ leading: 10, trailing: 6 }), ...(nativeGlassAvailable ? [glassEffect({ glass: { variant: 'regular' }, shape: 'capsule' })] : [background(tokens.surface), clipShape('capsule')])]}>
               {source ? <SourceIconNative source={source.key} tokens={tokens} size={32} /> : <ZStack alignment="center" modifiers={[frame({ width: 32, height: 32 })]}><SymbolImage name="link" color={tokens.secondary} size={18} /></ZStack>}
-              <TextField ref={urlInput} text={urlState} onTextChange={(value) => { if (value !== urlRef.current) reset(value); }} placeholder="Pega un enlace" modifiers={[frame({ maxWidth: Infinity }), font({ textStyle: 'body' }), lineLimit(1), textFieldStyle('plain'), keyboardType('url'), textInputAutocapitalization('never'), autocorrectionDisabled(), disabled(phase === 'downloading'), accessibilityLabel('Enlace del contenido'), submitLabel('go'), onSubmit(() => void analyze())]} />
-              {!url.trim()
-                ? <NativeCircleButton tokens={tokens} label="Pegar enlace" systemName="doc.on.clipboard" onPress={() => void paste()} />
-                : analysis
-                  ? <NativeCircleButton tokens={tokens} label="Borrar enlace" systemName="xmark" onPress={() => reset('')} disabled={phase === 'downloading'} />
-                  : <NativeCircleButton tokens={tokens} accent label="Analizar enlace" systemName="arrow.up" onPress={() => void analyze()} busy={phase === 'analyzing'} />}
+              <TextField ref={urlInput} text={urlState} onTextChange={(value) => { if (value !== urlRef.current) reset(value); }} placeholder="Pega un enlace" onFocusChange={setUrlFocused} modifiers={[frame({ maxWidth: Infinity }), font({ textStyle: 'body' }), lineLimit(1), textFieldStyle('plain'), keyboardType('url'), textInputAutocapitalization('never'), autocorrectionDisabled(), disabled(phase === 'downloading'), accessibilityLabel('Enlace del contenido'), submitLabel('go'), onSubmit(() => void analyze())]} />
+              <FieldActionNative tokens={tokens} {...fieldAction(url, urlFocused, phase, Boolean(analysis))} onPaste={() => void paste()} onClear={() => { reset(''); void urlInput.current?.focus(); }} onAnalyze={() => void analyze()} />
             </HStack>
 
             {error ? <HStack alignment="firstTextBaseline" spacing={8} modifiers={[padding({ horizontal: 4 })]}>
