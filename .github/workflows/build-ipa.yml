@@ -1,0 +1,71 @@
+# Builds the standalone app as an .ipa for AltStore/SideStore on a GitHub
+# macOS runner. The .ipa is attached to the run and to the `ipa-latest` release.
+name: build-ipa
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [native]
+    paths-ignore: ['**/*.md', 'downloader-service/**']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-ipa
+  cancel-in-progress: true
+
+jobs:
+  ipa:
+    runs-on: macos-26
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test && npx tsc --noEmit
+
+      - name: Fetch Python for iOS and the downloader packages
+        run: HOST_PYTHON=python modules/superapp-native/scripts/fetch-python.sh
+
+      - name: Generate the native project
+        run: npx expo prebuild --platform ios --clean --no-install
+
+      - name: Install pods
+        run: cd ios && pod install
+
+      - name: Build
+        run: |
+          set -o pipefail
+          xcodebuild -workspace ios/Miniapps.xcworkspace -scheme Miniapps -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/dd \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build | xcbeautify --renderer github-actions
+
+      - name: Package
+        run: scripts/ipa/package.sh build/dd/Build/Products/Release-iphoneos/Miniapps.app build/MySuperApp.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MySuperApp-ipa
+          path: build/MySuperApp.ipa
+          retention-days: 14
+
+      - name: Update the ipa-latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view ipa-latest >/dev/null 2>&1 || gh release create ipa-latest --title "IPA (AltStore/SideStore)" --notes "Última compilación de la rama native." --prerelease --target "$GITHUB_SHA"
+          gh release upload ipa-latest build/MySuperApp.ipa --clobber

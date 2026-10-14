@@ -4,7 +4,7 @@ Este servicio ejecuta yt-dlp en Windows y expone el análisis y la descarga para
 
 La app primero consulta `POST /analyze` para obtener el título, el canal y la duración sin descargar el archivo. Después usa `POST /download` con el formato elegido.
 
-Cada descarga usa su propia carpeta para permitir repetir enlaces y atender solicitudes simultáneas. Audio extrae un M4A con FFmpeg y devuelve `audio/mp4` para compartirlo correctamente en iOS.
+Cada descarga usa su propia carpeta para permitir repetir enlaces. Las descargas y uniones de video se reparten entre `DOWNLOADER_WORKERS` hilos (2 por defecto); el resto espera en cola. Con más de `DOWNLOADER_MAX_PENDING` tareas en curso o en espera (8 por defecto), el servicio responde 429 hasta que termine alguna. Audio extrae un M4A con FFmpeg y devuelve `audio/mp4` para compartirlo correctamente en iOS.
 
 Requiere Python 3.10 o posterior. Desde esta carpeta:
 
@@ -14,7 +14,7 @@ py -3.10 -m venv .venv
 .\.venv\Scripts\python server.py
 ```
 
-La app usa `http://192.168.101.3:8787` por defecto, que es la IP local actual de este PC. Si cambia, inicia Expo con otra URL:
+La app usa `http://192.168.101.3:8787` por defecto. Si la IP del PC cambia, escribe la nueva dirección en Ajustes › Downloader; la app la guarda y comprueba la conexión con `GET /health`. También puedes fijar otra dirección al iniciar Expo:
 
 ```powershell
 $env:EXPO_PUBLIC_DOWNLOADER_API_URL="http://TU_IP_LOCAL:8787"
@@ -34,6 +34,12 @@ Las publicaciones solo con fotos (Instagram, X, Facebook) se leen con gallery-dl
 ```powershell
 $env:DOWNLOADER_COOKIES_BROWSER="chrome"
 .\.venv\Scripts\python server.py
+```
+
+Si la regla existe y el iPhone sigue sin conectar, revisa si Windows tiene reglas que **bloquean** `python.exe` (se crean al cancelar el aviso del firewall). Un bloqueo gana sobre cualquier permiso. En PowerShell como administrador:
+
+```powershell
+Get-NetFirewallApplicationFilter | Where-Object Program -match 'python' | Get-NetFirewallRule | Where-Object Action -eq 'Block' | Disable-NetFirewallRule
 ```
 
 Para combinar video y audio en un MP4, yt-dlp puede requerir FFmpeg instalado y accesible en el PATH. El servicio está pensado para tu red local; no lo expongas a Internet sin autenticación.

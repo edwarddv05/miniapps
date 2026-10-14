@@ -1392,7 +1392,12 @@ function AppContent() {
 
     try {
       setAiScanning(true);
-      const scanned = await pickImagesAndScan(activeKey);
+      const result = await pickImagesAndScan(activeKey);
+      // Classes with a day or time the scanner could not read are left out here;
+      // the iPhone app lets them be corrected before importing.
+      const scanned = result?.filter((item) => !item.issues.length).map((item) => item.entry) ?? null;
+      const unread = (result?.length ?? 0) - (scanned?.length ?? 0);
+      if (unread) Alert.alert('Clases sin importar', `${unread === 1 ? '1 clase tiene' : `${unread} clases tienen`} un día u hora que no se pudo leer.`);
       if (scanned && scanned.length > 0) {
         setScannedSchedule(scanned);
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);

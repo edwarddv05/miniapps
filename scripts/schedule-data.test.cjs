@@ -31,6 +31,37 @@ test('legacy three-colour records load with the hue they were shown with', () =>
   assert.deepEqual(parseSchedule(JSON.stringify(legacy)).map((item) => item.color), ['indigo', 'blue', 'green']);
 });
 
+test('code and section printed together split at the letters after the digits', () => {
+  const { splitCourseCode, courseLabel, shortCourseName } = moduleExports;
+  assert.deepEqual(splitCourseCode('GE703U'), { code: 'GE703', section: 'U' });
+  assert.deepEqual(splitCourseCode(' si601v '), { code: 'SI601', section: 'V' });
+  assert.equal(splitCourseCode('GE703'), null);
+  assert.equal(splitCourseCode('Cálculo'), null);
+  assert.equal(courseLabel({ code: 'GE703', section: 'U' }), 'GE703 U');
+  assert.equal(courseLabel({}), '');
+  assert.equal(shortCourseName({ title: 'Investigación de Operaciones II', code: undefined }), 'IO II');
+  assert.equal(shortCourseName({ title: 'Ciberseguridad', code: 'SI705' }), 'SI705');
+});
+
+test('records with code and section load, and a non-string code is rejected', () => {
+  assert.equal(parseSchedule(JSON.stringify([{ ...entry, code: 'GE703', section: 'U' }]))[0].code, 'GE703');
+  assert.throws(() => parseSchedule(JSON.stringify([{ ...entry, code: 703 }])));
+});
+
+test('theory and practice of one course may share hours; different courses clash', () => {
+  const { classesClash, normalizeClassKind } = moduleExports;
+  const theory = { ...entry, id: 't', code: 'SI130', kind: 'T', start: '16:00', end: '18:00' };
+  const practice = { ...entry, id: 'p', code: 'SI130', kind: 'PRA', start: '17:00', end: '19:00' };
+  const other = { ...entry, id: 'o', code: 'SI155', kind: 'T', start: '16:00', end: '18:00' };
+  assert.equal(classesClash(theory, practice), false);
+  assert.equal(classesClash(theory, other), true);
+  assert.equal(classesClash(theory, { ...theory, id: 't2' }), true);
+  assert.equal(normalizeClassKind('PRA'), 'PRA');
+  assert.equal(normalizeClassKind(' teoría '), 'T');
+  assert.equal(normalizeClassKind('x'), undefined);
+  assert.throws(() => parseSchedule(JSON.stringify([{ ...entry, kind: 'X' }])));
+});
+
 test('today agenda distinguishes upcoming, ongoing, and finished classes', () => {
   const later = { ...entry, id: 'later', start: '11:00', end: '12:00' };
   const entries = [later, entry];

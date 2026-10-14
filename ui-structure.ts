@@ -1,4 +1,4 @@
-export type MiniappDestination = 'library' | 'schedule' | 'downloader';
+export type MiniappDestination = 'library' | 'schedule' | 'downloader' | 'anime' | 'transit' | 'cards';
 
 export const UI = {
   contentWidth: 720,

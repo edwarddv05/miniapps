@@ -1,9 +1,15 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
-import { SCHEDULE_COLORS, type DayIndex, type ScheduleColor, type ScheduleEntry } from './schedule-data';
+import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
+import { extractJsonArray, parseScannedClasses, type ScannedClass } from './schedule-scan';
 
-export const GEMINI_API_KEY_STORAGE = '@miniapps/gemini_api_key';
+// Earlier versions kept the key in AsyncStorage; it moves to the Keychain on first read.
+const LEGACY_KEY_STORAGE = '@miniapps/gemini_api_key';
+const SECURE_KEY = 'gemini_api_key';
+// The web build has no Keychain.
+const hasKeychain = Platform.OS !== 'web';
 
 export type ScannedImage = {
   base64: string;
@@ -12,23 +18,33 @@ export type ScannedImage = {
 
 export async function getGeminiApiKey(): Promise<string> {
   try {
-    return (await AsyncStorage.getItem(GEMINI_API_KEY_STORAGE)) ?? '';
+    if (!hasKeychain) return (await AsyncStorage.getItem(LEGACY_KEY_STORAGE)) ?? '';
+    const stored = await SecureStore.getItemAsync(SECURE_KEY);
+    if (stored) return stored;
+    const legacy = await AsyncStorage.getItem(LEGACY_KEY_STORAGE);
+    if (!legacy) return '';
+    await SecureStore.setItemAsync(SECURE_KEY, legacy);
+    await AsyncStorage.removeItem(LEGACY_KEY_STORAGE);
+    return legacy;
   } catch {
     return '';
   }
 }
 
 export async function setGeminiApiKey(key: string): Promise<void> {
-  await AsyncStorage.setItem(GEMINI_API_KEY_STORAGE, key.trim());
+  const value = key.trim();
+  if (!hasKeychain) {
+    await (value ? AsyncStorage.setItem(LEGACY_KEY_STORAGE, value) : AsyncStorage.removeItem(LEGACY_KEY_STORAGE));
+    return;
+  }
+  if (value) await SecureStore.setItemAsync(SECURE_KEY, value);
+  else await SecureStore.deleteItemAsync(SECURE_KEY);
+  await AsyncStorage.removeItem(LEGACY_KEY_STORAGE).catch(() => undefined);
+  modelsCache = null;
 }
 
-function normalizeTime(timeStr: string): string {
-  const match = timeStr.trim().match(/^(\d{1,2}):(\d{2})$/);
-  if (!match) return '08:00';
-  const hours = match[1].padStart(2, '0');
-  const minutes = match[2];
-  return `${hours}:${minutes}`;
-}
+// The key goes only in this header, never in the URL, where proxies and logs keep it.
+const geminiHeaders = (apiKey: string) => ({ 'Content-Type': 'application/json', 'x-goog-api-key': apiKey });
 
 const SYSTEM_PROMPT = `
 Eres un asistente experto analizando horarios universitarios y escolares (incluyendo cuadrículas semanales de clases, boletas de matrícula oficiales de universidades como la UNI, tablas de asignaturas, etc.).
@@ -47,12 +63,18 @@ Reglas:
    5: Sábado
    6: Domingo
 3. Horas en formato exacto 24 horas "HH:MM" (ej. "08:00", "14:00", "18:00", "22:00").
-4. Si la misma materia tiene bloques consecutivos en el mismo día (por ejemplo de 18:00 a 20:00 Teoría y de 20:00 a 22:00 Práctica), puedes consolidarlo en un solo bloque "18:00" a "22:00" con el aula respectiva.
+4. Cada fila es una sesión distinta: NO combines bloques consecutivos de la misma materia. "kind" es el tipo de la sesión (columna TIPO): "T" para Teoría, "PRA" para Práctica, "LAB" para Laboratorio; usa "" si no aparece. La teoría y la práctica de un mismo curso pueden coincidir en horario.
 5. Usa siempre "color": "blue"; la app asigna los colores por curso.
-6. Devuelve ÚNICAMENTE un JSON válido (sin backticks de markdown, sin texto adicional) con este esquema exacto:
+6. "code" es el código del curso (columna CURSO, ej. "GE703", "SI601") y "section" la sección (columna SEC, ej. "U", "V"). Si aparecen juntos como "GE703U", la última letra después de los números es la sección. Si no hay código o sección, usa "".
+7. "location" es el aula (columna AULA, ej. "S4-216", "S1-129 (LAB A)").
+8. "title" es el nombre completo del curso si aparece en alguna imagen; si solo hay código, usa el código como título.
+9. Devuelve ÚNICAMENTE un JSON válido (sin backticks de markdown, sin texto adicional) con este esquema exacto:
 [
   {
     "title": "Investigación de Operaciones II",
+    "code": "SI601",
+    "section": "V",
+    "kind": "T",
     "day": 0,
     "start": "16:00",
     "end": "18:00",
@@ -62,16 +84,13 @@ Reglas:
 ]
 `;
 
+// The model list is asked once per key and session.
+let modelsCache: { apiKey: string; models: string[] } | null = null;
+
 async function resolveSupportedModels(apiKey: string): Promise<string[]> {
+  if (modelsCache?.apiKey === apiKey) return modelsCache.models;
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`;
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': apiKey,
-      }
-    });
+    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models', { headers: geminiHeaders(apiKey) });
 
     if (response.ok) {
       const data = await response.json();
@@ -90,6 +109,7 @@ async function resolveSupportedModels(apiKey: string): Promise<string[]> {
 
         const candidates = [...flashModels, ...otherModels];
         if (candidates.length > 0) {
+          modelsCache = { apiKey, models: candidates };
           return candidates;
         }
       }
@@ -107,10 +127,55 @@ async function resolveSupportedModels(apiKey: string): Promise<string[]> {
   ];
 }
 
+function geminiErrorMessage(status: number, body: string) {
+  try {
+    const message = JSON.parse(body)?.error?.message;
+    if (message) return String(message);
+  } catch {}
+  return `Error HTTP ${status}`;
+}
+
+// Models in the list that only produce audio, images or live sessions reject
+// a plain text request with 400.
+const NON_TEXT_MODEL = /tts|image|audio|live|native|embed|veo|imagen|robotics|computer-use/i;
+const PREFERRED_TEXT_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'];
+
+// Plain text generation, tried on each available model in turn.
+export async function generateGeminiText(prompt: string, apiKey: string): Promise<string> {
+  const cleanKey = apiKey.trim();
+  if (!cleanKey) throw new Error('Debes configurar una clave de API de Gemini válida.');
+  const available = (await resolveSupportedModels(cleanKey)).filter((model) => !NON_TEXT_MODEL.test(model));
+  const models = [...PREFERRED_TEXT_MODELS.filter((model) => available.includes(model)), ...available.filter((model) => !PREFERRED_TEXT_MODELS.includes(model))];
+  let lastError: Error | null = null;
+  for (const model of models) {
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: 'POST',
+        headers: geminiHeaders(cleanKey),
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.2 } }),
+      });
+      if (!response.ok) {
+        const error = new Error(geminiErrorMessage(response.status, await response.text()));
+        // A rejected key fails the same way on every model; any other error may be the model's own.
+        if (response.status === 401 || response.status === 403 || /api key/i.test(error.message)) throw Object.assign(error, { fatal: true });
+        throw error;
+      }
+      const data = await response.json();
+      const text = (data?.candidates?.[0]?.content?.parts ?? []).map((part: { text?: string }) => part.text ?? '').join('').trim();
+      if (!text) throw new Error('El servicio no devolvió contenido.');
+      return text;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if ((lastError as { fatal?: boolean }).fatal) break;
+    }
+  }
+  throw lastError ?? new Error('No se pudo generar la respuesta.');
+}
+
 export async function scanScheduleFromImages(
   images: ScannedImage[],
   apiKey: string
-): Promise<ScheduleEntry[]> {
+): Promise<ScannedClass[]> {
   const cleanKey = apiKey.trim();
   if (!cleanKey) {
     throw new Error('Debes configurar una clave de API de Gemini válida.');
@@ -139,13 +204,10 @@ export async function scanScheduleFromImages(
 
   for (const model of models) {
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(cleanKey)}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
       let response = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': cleanKey,
-        },
+        headers: geminiHeaders(cleanKey),
         body: JSON.stringify({
           contents: [{ parts }],
           generationConfig: {
@@ -159,10 +221,7 @@ export async function scanScheduleFromImages(
         // Fallback without responseMimeType in case model doesn't support json mode
         const retryRes = await fetch(url, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': cleanKey,
-          },
+          headers: geminiHeaders(cleanKey),
           body: JSON.stringify({
             contents: [{ parts }],
             generationConfig: {
@@ -193,56 +252,8 @@ export async function scanScheduleFromImages(
         throw new Error('El servicio no devolvió contenido.');
       }
 
-      // Clean markdown fencing and extract JSON array
-      let cleaned = rawText.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-      const firstBracket = cleaned.indexOf('[');
-      const lastBracket = cleaned.lastIndexOf(']');
-      if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
-        cleaned = cleaned.slice(firstBracket, lastBracket + 1);
-      }
-      const parsedEntries = JSON.parse(cleaned);
-
-      if (!Array.isArray(parsedEntries)) {
-        throw new Error('La respuesta no tiene el formato de lista esperado.');
-      }
-
-      // One colour per course, so repeated sessions of a subject match and
-      // different subjects stay apart.
-      const courseColors = new Map<string, ScheduleColor>();
-      const colorFor = (title: string) => {
-        const key = title.toLocaleLowerCase('es');
-        if (!courseColors.has(key)) courseColors.set(key, SCHEDULE_COLORS[courseColors.size % SCHEDULE_COLORS.length]);
-        return courseColors.get(key) as ScheduleColor;
-      };
-      const results: ScheduleEntry[] = [];
-
-      for (let i = 0; i < parsedEntries.length; i++) {
-        const item = parsedEntries[i];
-        if (!item || typeof item !== 'object') continue;
-        const title = String(item.title || '').trim();
-        if (!title) continue;
-
-        let day = Number(item.day);
-        if (isNaN(day) || day < 0 || day > 6) day = 0;
-
-        const start = normalizeTime(String(item.start || '08:00'));
-        const end = normalizeTime(String(item.end || '10:00'));
-        // A block that does not end after it starts would make the stored
-        // schedule fail validation on the next launch.
-        if (end <= start) continue;
-        const location = item.location ? String(item.location).trim() : '';
-        const color = colorFor(title);
-
-        results.push({
-          id: `scanned-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
-          title,
-          day: day as DayIndex,
-          start,
-          end,
-          location,
-          color
-        });
-      }
+      const stamp = Date.now();
+      const results = parseScannedClasses(extractJsonArray(rawText), (index) => `scanned-${stamp}-${index}-${Math.random().toString(36).slice(2, 6)}`);
 
       if (!results.length) {
         throw new Error('No se detectaron clases en las imágenes proporcionadas.');
@@ -258,7 +269,7 @@ export async function scanScheduleFromImages(
   throw lastError ?? new Error('No se pudo procesar el horario.');
 }
 
-export async function pickImagesAndScan(apiKey: string): Promise<ScheduleEntry[] | null> {
+export async function pickImagesAndScan(apiKey: string): Promise<ScannedClass[] | null> {
   const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (!perm.granted) {
     throw new Error('Se requiere permiso para acceder a tus fotos y seleccionar los horarios.');

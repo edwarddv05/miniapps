@@ -9,7 +9,15 @@
     "scheme": "miniapps",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.mysuperapp.miniapps"
+      "bundleIdentifier": "com.mysuperapp.miniapps",
+      "entitlements": {
+        "com.apple.security.application-groups": [
+          "group.com.mysuperapp.miniapps"
+        ]
+      },
+      "infoPlist": {
+        "NSPhotoLibraryAddUsageDescription": "La app guarda en Fotos los videos e imágenes que descargas."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -32,7 +40,17 @@
           "photosPermission": "La app necesita acceso a tus fotos para escanear y generar tu horario automáticamente."
         }
       ],
-      "expo-video"
+      "expo-video",
+      "expo-asset",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "La app usa tu ubicación para mostrarte las estaciones del Metropolitano más cercanas."
+        }
+      ],
+      "expo-secure-store",
+      "@bacons/apple-targets",
+      "./modules/superapp-native/app.plugin.js"
     ]
   }
 }

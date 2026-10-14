@@ -45,3 +45,8 @@ yarn-error.*
 /downloader-service/.venv/
 /downloader-service/downloads/
 __pycache__/
+
+# Embedded Python for the standalone build (scripts in modules/superapp-native/scripts)
+/modules/superapp-native/ios/Python.xcframework/
+/modules/superapp-native/build/
+/build/
