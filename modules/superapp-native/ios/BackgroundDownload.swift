@@ -41,7 +41,8 @@ public struct DownloadActivityAttributes: ActivityAttributes {
 /// Finished files go to Documents/downloads and are listed in
 /// background.json, which the app adds to Descargas when it next opens.
 public enum BackgroundDownload {
-  public static func run(url: URL, mode requested: String, quality: Int?) async throws -> String {
+  /// Returns the saved file and the name it should carry outside the app.
+  public static func run(url: URL, mode requested: String, quality: Int?) async throws -> (file: URL, filename: String) {
     let host = (url.host ?? "enlace").replacingOccurrences(of: "www.", with: "")
     var state = DownloadActivityAttributes.ContentState(stage: "analyzing", title: host, detail: "Analizando enlace…", fraction: -1)
     let activity: Activity<DownloadActivityAttributes>? = ActivityAuthorizationInfo().areActivitiesEnabled
@@ -157,7 +158,7 @@ public enum BackgroundDownload {
       state.fraction = 1
       state.detail = ["Guardado", size.map { formatBytes($0) }].compactMap { $0 }.joined(separator: " · ")
       await activity?.end(ActivityContent(state: state, staleDate: nil), dismissalPolicy: .after(Date().addingTimeInterval(15 * 60)))
-      return title
+      return (target, filename.replacingOccurrences(of: "/", with: "-"))
     } catch {
       state.stage = "error"
       state.detail = (error as? LocalizedError)?.errorDescription ?? "No se pudo descargar."

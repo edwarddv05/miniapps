@@ -1,4 +1,5 @@
 import AppIntents
+import UniformTypeIdentifiers
 internal import SuperappNative
 
 // The Shortcuts action "Descargar enlace". It lives in the app target so
@@ -67,8 +68,11 @@ struct DownloadLinkIntent: AppIntent, LiveActivityIntent {
     Summary("Descargar \(\.$url) como \(\.$format) en \(\.$quality)")
   }
 
-  func perform() async throws -> some IntentResult {
-    _ = try await BackgroundDownload.run(url: url, mode: format.rawValue, quality: format == .video ? quality.height : nil)
-    return .result()
+  // The file is the action's output, so the next action can save it to
+  // Photos or Files.
+  func perform() async throws -> some IntentResult & ReturnsValue<IntentFile> {
+    let saved = try await BackgroundDownload.run(url: url, mode: format.rawValue, quality: format == .video ? quality.height : nil)
+    let type = UTType(filenameExtension: saved.file.pathExtension) ?? .data
+    return .result(value: IntentFile(fileURL: saved.file, filename: saved.filename, type: type))
   }
 }
