@@ -1,5 +1,5 @@
 import AppIntents
-import SuperappNative
+internal import SuperappNative
 
 // The Shortcuts action "Descargar enlace". It lives in the app target so
 // Shortcuts finds it; the work happens in SuperappNative's BackgroundDownload.
