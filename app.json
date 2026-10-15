@@ -16,7 +16,8 @@
         ]
       },
       "infoPlist": {
-        "NSPhotoLibraryAddUsageDescription": "La app guarda en Fotos los videos e imágenes que descargas."
+        "NSPhotoLibraryAddUsageDescription": "La app guarda en Fotos los videos e imágenes que descargas.",
+        "NSSupportsLiveActivities": true
       }
     },
     "android": {

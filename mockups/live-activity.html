@@ -1,0 +1,189 @@
+<meta charset="utf-8">
+<title>Descarga en vivo</title>
+<style>
+  :root {
+    --bg: #eef0f4; --fg: #1b1e26; --muted: #5d6475; --rule: #d5d9e2; --accent: #6f63e8; --control: #fff;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    --round: ui-rounded, "SF Pro Rounded", -apple-system, "Segoe UI", sans-serif;
+    --blue: #0a84ff; --green: #30d158; --red: #ff453a;
+  }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #0b0c10; --fg: #e9ebf0; --muted: #959bab; --rule: #262a33; --accent: #9a90ff; --control: #1a1d24; color-scheme: dark; } }
+  :root[data-theme="dark"] { --bg: #0b0c10; --fg: #e9ebf0; --muted: #959bab; --rule: #262a33; --accent: #9a90ff; --control: #1a1d24; color-scheme: dark; }
+  body { background: var(--bg); color: var(--fg); font-family: var(--font); padding: 24px 16px 48px; margin: 0; }
+  .wrap { max-width: 1120px; margin: 0 auto; display: grid; gap: 22px; }
+  header h1 { font: 700 26px/1.15 var(--round); margin: 0 0 6px; }
+  header p { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.5; max-width: 70ch; }
+  .states { display: flex; flex-wrap: wrap; gap: 8px; }
+  .states button { font: 600 14px var(--font); padding: 7px 13px; border-radius: 999px; border: 1px solid var(--rule); background: var(--control); color: var(--fg); cursor: pointer; }
+  .states button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .states button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .phones { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; align-items: start; }
+  @media (max-width: 980px) { .phones { grid-template-columns: 1fr; justify-items: center; } }
+  figure { margin: 0; display: grid; gap: 10px; width: 100%; max-width: 340px; }
+  figcaption { font-size: 14px; line-height: 1.45; color: var(--muted); }
+  figcaption b { display: block; color: var(--fg); font-size: 15px; margin-bottom: 2px; }
+
+  .phone { position: relative; width: 100%; aspect-ratio: 340 / 700; border-radius: 44px; overflow: hidden; color: #fff; box-shadow: 0 0 0 9px #050608, 0 18px 40px rgba(0,0,0,.28); }
+  .wall { position: absolute; inset: 0; background: radial-gradient(120% 70% at 20% 10%, #3a5bd1, transparent 60%), radial-gradient(120% 80% at 90% 90%, #b8417a, transparent 55%), #121427; }
+  .lock-time { position: absolute; top: 74px; left: 0; right: 0; text-align: center; }
+  .lock-time small { display: block; font: 600 15px var(--font); opacity: .85; }
+  .lock-time b { font: 700 74px/1 var(--round); letter-spacing: -1px; }
+  .island { position: absolute; top: 11px; left: 50%; transform: translateX(-50%); background: #000; border-radius: 22px; height: 34px; width: 120px; transition: width .4s cubic-bezier(.3,1.3,.5,1), height .4s cubic-bezier(.3,1.3,.5,1), border-radius .4s; display: flex; align-items: center; justify-content: space-between; padding: 0 7px; box-sizing: border-box; z-index: 3; }
+
+  /* Lock screen activity */
+  .la { position: absolute; left: 12px; right: 12px; bottom: 96px; border-radius: 24px; padding: 14px; background: rgba(28,28,32,.62); backdrop-filter: blur(24px) saturate(1.6); -webkit-backdrop-filter: blur(24px) saturate(1.6); box-shadow: inset 0 1px 0 rgba(255,255,255,.12); display: grid; gap: 12px; }
+  .row { display: grid; grid-template-columns: 52px minmax(0,1fr) auto; gap: 12px; align-items: center; }
+  .thumb { width: 52px; height: 52px; border-radius: 12px; position: relative; background: linear-gradient(160deg, #6fa86a, #2f5a35 60%, #1b2f22); overflow: visible; }
+  .thumb::before { content: ""; position: absolute; left: 30%; top: 14%; width: 40%; height: 40%; border-radius: 50%; background: radial-gradient(circle, #3e7d3a 55%, transparent 57%); }
+  .brand { position: absolute; right: -5px; bottom: -5px; width: 20px; height: 20px; border-radius: 6px; background: #ff0033; display: grid; place-items: center; box-shadow: 0 0 0 2px rgba(28,28,32,.9); }
+  .brand::after { content: ""; border-left: 6px solid #fff; border-top: 4px solid transparent; border-bottom: 4px solid transparent; margin-left: 1px; }
+  .txt { min-width: 0; display: grid; gap: 2px; }
+  .txt b { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .txt span { font-size: 13px; color: rgba(255,255,255,.65); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+  .pct { font: 700 26px var(--round); font-variant-numeric: tabular-nums; }
+  .end { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; }
+  .end.ok { background: var(--green); }
+  .end.bad { background: var(--red); }
+  .end svg { width: 18px; height: 18px; }
+  .bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,.16); overflow: hidden; position: relative; }
+  .bar i { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: var(--blue); transition: width .5s ease, background .3s; }
+  .bar.indet i { width: 30% !important; animation: slide 1.2s ease-in-out infinite; }
+  @keyframes slide { from { left: -30%; } to { left: 100%; } }
+  .foot { display: flex; justify-content: space-between; font-size: 12px; color: rgba(255,255,255,.6); font-variant-numeric: tabular-nums; }
+
+  /* Island pieces */
+  .mini-thumb { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(160deg, #6fa86a, #2f5a35); flex: none; }
+  .ring { width: 22px; height: 22px; flex: none; }
+  .ring circle { fill: none; stroke-width: 3; }
+  .ring .track { stroke: rgba(255,255,255,.18); }
+  .ring .arc { stroke: var(--blue); stroke-linecap: round; transition: stroke-dashoffset .5s ease, stroke .3s; transform: rotate(-90deg); transform-origin: 50% 50%; }
+  .island .pctsm { font: 700 13px var(--round); color: var(--blue); font-variant-numeric: tabular-nums; }
+  .expanded { position: absolute; top: 11px; left: 11px; right: 11px; border-radius: 40px; background: #000; padding: 18px 20px 18px; display: grid; gap: 12px; z-index: 3; }
+  .home { position: absolute; inset: 0; background: radial-gradient(100% 60% at 70% 20%, #2e7d6b, transparent 60%), radial-gradient(90% 70% at 10% 90%, #4a3aa8, transparent 60%), #10131c; }
+  .icons { position: absolute; top: 120px; left: 22px; right: 22px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 22px 18px; }
+  .icons i { aspect-ratio: 1; border-radius: 14px; background: rgba(255,255,255,.14); }
+  .label { position: absolute; left: 0; right: 0; text-align: center; font-size: 12px; color: rgba(255,255,255,.55); }
+
+  /* Shortcuts editor */
+  .sc { position: absolute; inset: 0; background: #1c1c1e; padding: 60px 14px 0; display: grid; gap: 14px; align-content: start; }
+  .sc h3 { margin: 0; font: 700 28px var(--round); }
+  .sc .sub { font-size: 13px; color: rgba(255,255,255,.55); margin-top: -8px; }
+  .card { background: #2c2c2e; border-radius: 14px; padding: 12px; display: grid; gap: 10px; }
+  .card .hd { display: flex; align-items: center; gap: 8px; font-size: 13px; color: rgba(255,255,255,.6); }
+  .appic { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(160deg, #e9f2ff, #b9d4ff); display: grid; place-items: center; color: #2b6be6; font: 800 13px var(--round); }
+  .sentence { font-size: 17px; line-height: 1.9; }
+  .chip { display: inline-block; padding: 1px 9px; border-radius: 8px; background: rgba(10,132,255,.22); color: #64a8ff; font-weight: 600; line-height: 1.5; cursor: pointer; border: 0; font-size: 17px; font-family: inherit; }
+  .chip.var { background: rgba(255,159,10,.22); color: #ffb340; }
+  .chip:focus-visible { outline: 2px solid #64a8ff; }
+  .more { font-size: 14px; color: #64a8ff; }
+  .opts { display: grid; gap: 0; border-radius: 12px; overflow: hidden; background: #3a3a3c; }
+  .opts div { padding: 11px 14px; font-size: 15px; display: flex; justify-content: space-between; }
+  .opts div + div { border-top: 1px solid rgba(255,255,255,.08); }
+  .opts small { color: rgba(255,255,255,.5); font-size: 15px; }
+  .share { display: flex; justify-content: space-between; align-items: center; font-size: 15px; background: #2c2c2e; border-radius: 12px; padding: 12px 14px; }
+  .toggle { width: 46px; height: 28px; border-radius: 14px; background: var(--green); position: relative; }
+  .toggle::after { content: ""; position: absolute; right: 2px; top: 2px; width: 24px; height: 24px; border-radius: 50%; background: #fff; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Descarga en vivo</h1>
+    <p>Compartes un enlace con el atajo y la app no se abre: la descarga aparece como Live Activity en la pantalla bloqueada y en la Dynamic Island hasta que termina. Toca un estado para verlo.</p>
+  </header>
+  <div class="states" role="group" aria-label="Estado">
+    <button type="button" data-s="analyzing" aria-pressed="false">Analizando</button>
+    <button type="button" data-s="downloading" aria-pressed="true">Descargando</button>
+    <button type="button" data-s="preparing" aria-pressed="false">Uniendo</button>
+    <button type="button" data-s="done" aria-pressed="false">Guardado</button>
+    <button type="button" data-s="error" aria-pressed="false">Error</button>
+  </div>
+  <div class="phones">
+    <figure><div class="phone" id="lock"></div><figcaption><b>Pantalla bloqueada</b>Miniatura con la marca del sitio, título, formato con su peso, porcentaje grande y barra. Al terminar, tocarla abre Descargas.</figcaption></figure>
+    <figure><div class="phone" id="isl"></div><figcaption><b>Dynamic Island</b>Compacta: miniatura a la izquierda, anillo con el porcentaje a la derecha. Mantener presionada la expande con título y barra. Si hay otra actividad, queda solo el anillo.</figcaption></figure>
+    <figure><div class="phone" id="sc"></div><figcaption><b>La acción en Atajos</b>Los campos azules se tocan para elegir; cada uno se puede dejar fijo o en Preguntar cada vez. Activado en la hoja de compartir, el atajo recibe el enlace solo.</figcaption></figure>
+  </div>
+</div>
+
+<script>
+(() => {
+  const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+  const BANG = '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M12 6v8M12 18.5v.01"/></svg>';
+  const TITLE = 'Knox · Tráiler oficial';
+  const STATE = {
+    analyzing: { line: 'Analizando enlace…', pct: null, indet: true, color: 'var(--blue)', foot: ['youtube.com', ''] },
+    downloading: { line: 'Video · 1080p · ≈ 120 MB', pct: 42, color: 'var(--blue)', foot: ['50 de 120 MB', 'quedan 0:38'] },
+    preparing: { line: 'Uniendo video y audio', pct: null, indet: true, color: 'var(--blue)', foot: ['120 MB', ''] },
+    done: { line: 'Guardado · 118 MB', pct: 100, color: 'var(--green)', end: 'ok', foot: ['Toca para abrir Descargas', ''] },
+    error: { line: 'No se pudo descargar', pct: 0, color: 'var(--red)', end: 'bad', foot: ['Ábrelo en la app para reintentar', ''] },
+  };
+  const ring = (pct, color, size = 22) => {
+    const r = 8.5, c = 2 * Math.PI * r, off = pct == null ? c * 0.72 : c * (1 - pct / 100);
+    return `<svg class="ring" viewBox="0 0 22 22" style="width:${size}px;height:${size}px"><circle class="track" cx="11" cy="11" r="${r}"/><circle class="arc" cx="11" cy="11" r="${r}" stroke-dasharray="${c}" stroke-dashoffset="${off}" style="stroke:${color}"/></svg>`;
+  };
+  const trailing = (s) => s.end ? `<span class="end ${s.end}">${s.end === 'ok' ? CHECK : BANG}</span>` : s.pct == null ? '' : `<span class="pct">${s.pct}&nbsp;%</span>`;
+  const bar = (s) => `<div class="bar ${s.indet ? 'indet' : ''}"><i style="width:${s.pct ?? 0}%;background:${s.color}"></i></div>`;
+
+  function draw(key) {
+    const s = STATE[key];
+    document.getElementById('lock').innerHTML = `<div class="wall"></div><div class="island"></div>
+      <div class="lock-time"><small>miércoles, 15 de octubre</small><b>10:24</b></div>
+      <div class="la"><div class="row"><div class="thumb"><span class="brand"></span></div><div class="txt"><b>${TITLE}</b><span>${s.line}</span></div>${trailing(s)}</div>
+      ${key === 'done' || key === 'error' ? '' : bar(s)}
+      <div class="foot"><span>${s.foot[0]}</span><span>${s.foot[1]}</span></div></div>`;
+    const compactRight = s.end ? `<span class="end ${s.end}" style="width:22px;height:22px">${s.end === 'ok' ? CHECK : BANG}</span>` : ring(s.pct, s.color);
+    document.getElementById('isl').innerHTML = `<div class="home"></div>
+      <div class="island" style="width:206px"><span class="mini-thumb"></span>${compactRight}</div>
+      <div class="label" style="top:52px">Compacta</div>
+      <div class="expanded" style="top:96px"><div class="row" style="grid-template-columns:52px minmax(0,1fr) auto"><div class="thumb"><span class="brand" style="box-shadow:0 0 0 2px #000"></span></div><div class="txt"><b>${TITLE}</b><span>${s.line}</span></div>${trailing(s)}</div>${key === 'done' || key === 'error' ? '' : bar(s)}</div>
+      <div class="label" style="top:236px">Expandida</div>
+      <div class="island" style="top:290px;width:150px;justify-content:flex-end"><span style="position:absolute;left:10px;width:36px;height:22px;border-radius:11px;background:#1d1d1f"></span>${s.end ? `<span class="end ${s.end}" style="width:22px;height:22px">${s.end === 'ok' ? CHECK : BANG}</span>` : ring(s.pct, s.color)}</div>
+      <div class="label" style="top:332px">Mínima, junto a otra actividad</div>`;
+  }
+
+  document.getElementById('sc').innerHTML = `<div class="sc">
+    <h3>Bajar video</h3><div class="sub">Atajo</div>
+    <div class="card"><div class="hd"><span class="appic">M</span>Miniapps</div>
+      <div class="sentence">Descargar <button class="chip var" type="button">Entrada de la hoja</button> como <button class="chip" type="button" id="fmt">Video</button> en <button class="chip" type="button" id="q">1080p</button></div>
+      <div class="more">Mostrar más</div>
+      <div class="opts" id="opts" hidden></div>
+    </div>
+    <div class="share"><span>Mostrar en la hoja de compartir</span><span class="toggle" aria-hidden="true"></span></div>
+    <div class="card"><div class="hd"><span class="appic">M</span>Miniapps</div><div class="sentence">Descargar <button class="chip var" type="button">Entrada de la hoja</button> como <button class="chip" type="button">Audio</button></div></div>
+  </div>`;
+  const opts = document.getElementById('opts');
+  const menus = { fmt: ['Video', 'Audio', 'Miniatura', 'Preguntar cada vez'], q: ['Máxima', '1080p', '720p', '480p', '360p', 'Preguntar cada vez'] };
+  let open = null;
+  document.getElementById('sc').addEventListener('click', (e) => {
+    const chip = e.target.closest('.chip[id]');
+    const pick = e.target.closest('.opts div');
+    if (pick && open) {
+      document.getElementById(open).textContent = pick.dataset.v;
+      document.getElementById('q').hidden = document.getElementById('fmt').textContent !== 'Video';
+      opts.hidden = true; open = null; return;
+    }
+    if (!chip) return;
+    open = open === chip.id ? null : chip.id;
+    opts.hidden = !open;
+    if (open) opts.innerHTML = menus[open].map((v) => `<div data-v="${v}" tabindex="0">${v}${v === chip.textContent ? '<small>✓</small>' : ''}</div>`).join('');
+  });
+
+  let current = 'downloading';
+  document.querySelector('.states').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    current = b.dataset.s;
+    document.querySelectorAll('.states button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    draw(current);
+  });
+  // The downloading state counts up so the bar and ring move.
+  setInterval(() => {
+    if (current !== 'downloading') return;
+    const s = STATE.downloading;
+    s.pct = s.pct >= 96 ? 8 : s.pct + 4;
+    const mb = Math.round(120 * s.pct / 100);
+    s.foot = [`${mb} de 120 MB`, `quedan 0:${String(Math.max(2, Math.round((100 - s.pct) * 0.66))).padStart(2, '0')}`];
+    draw('downloading');
+  }, 900);
+  draw(current);
+})();
+</script>

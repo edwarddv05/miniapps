@@ -556,6 +556,23 @@ export async function saveDownloadHistory(items: DownloadHistoryItem[]) {
   await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(items.slice(0, HISTORY_LIMIT)));
 }
 
+/**
+ * Downloads finished by the Shortcuts action while the app was closed. The
+ * native side lists them in downloads/background.json; reading takes them.
+ */
+export async function takeBackgroundDownloads(): Promise<DownloadHistoryItem[]> {
+  if (Platform.OS === 'web' || !FileSystem.documentDirectory) return [];
+  const path = `${FileSystem.documentDirectory}downloads/background.json`;
+  try {
+    if (!(await FileSystem.getInfoAsync(path)).exists) return [];
+    const value: unknown = JSON.parse(await FileSystem.readAsStringAsync(path));
+    await FileSystem.deleteAsync(path, { idempotent: true });
+    return Array.isArray(value) ? value.filter((item): item is DownloadHistoryItem => Boolean(item && typeof item.id === 'string' && typeof item.uri === 'string' && typeof item.createdAt === 'number')) : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function fileExists(uri: string) {
   if (Platform.OS === 'web') return true;
   try {

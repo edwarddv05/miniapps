@@ -628,6 +628,7 @@ struct ScheduleWidget: Widget {
 struct SuperappWidgets: WidgetBundle {
   var body: some Widget {
     ScheduleWidget()
+    DownloadActivityWidget()
   }
 }
 

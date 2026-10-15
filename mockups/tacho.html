@@ -1,0 +1,163 @@
+<meta charset="utf-8">
+<title>Tacho de vidrio</title>
+<style>
+  :root {
+    --bg: #eef0f4; --fg: #1b1e26; --muted: #5d6475; --rule: #d5d9e2; --accent: #6f63e8; --control: #fff;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    --round: ui-rounded, "SF Pro Rounded", -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #0b0c10; --fg: #e9ebf0; --muted: #959bab; --rule: #262a33; --accent: #9a90ff; --control: #1a1d24; color-scheme: dark; } }
+  :root[data-theme="dark"] { --bg: #0b0c10; --fg: #e9ebf0; --muted: #959bab; --rule: #262a33; --accent: #9a90ff; --control: #1a1d24; color-scheme: dark; }
+  body { background: var(--bg); color: var(--fg); font-family: var(--font); padding: 24px 16px 40px; margin: 0; }
+  .page { max-width: 900px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); gap: 28px; align-items: start; }
+  @media (max-width: 720px) { .page { grid-template-columns: 1fr; justify-items: center; } }
+  .copy { display: grid; gap: 14px; max-width: 60ch; }
+  .copy h1 { font: 700 26px/1.15 var(--round); margin: 0; }
+  .copy p { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.5; }
+  .copy ul { margin: 0; padding-left: 20px; display: grid; gap: 8px; font-size: 15px; line-height: 1.45; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; }
+  .controls button { font: 600 14px var(--font); padding: 7px 13px; border-radius: 999px; border: 1px solid var(--rule); background: var(--control); color: var(--fg); cursor: pointer; }
+  .controls button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .phone { position: relative; width: 100%; max-width: 360px; aspect-ratio: 360 / 740; border-radius: 44px; overflow: hidden; background: #111319; color: #f4f5f8; box-shadow: 0 0 0 9px #050608, 0 18px 40px rgba(0,0,0,.28); }
+  .grid { position: absolute; inset: 120px 18px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-content: start; }
+  .tile { aspect-ratio: 1; border-radius: 14px; }
+  .t1 { background: linear-gradient(180deg, #ff8a5c, #c94b6d 45%, #5b2c6f 70%); }
+  .t2 { background: linear-gradient(135deg, #2b3a67, #7b6fd6); }
+  .t3 { background: linear-gradient(180deg, #7cc6e8, #2f7fb3 55%, #1c4f7a); }
+  .t4 { background: radial-gradient(circle at 50% 55%, #f4c26b 0 22%, #b0532c 23% 34%, #6b3a22 35%); }
+  .t5 { background: linear-gradient(180deg, #23243a, #3e3263); }
+  .t6 { background: linear-gradient(160deg, #3c8b5a, #1f4d39); }
+  .head { position: absolute; top: 58px; left: 0; right: 0; text-align: center; font: 600 17px var(--font); }
+
+  /* Liquid glass: blurred, saturated backdrop, a bright rim that is
+     stronger on the lit side, a soft specular and an inner shade. */
+  .glass { position: absolute; left: 50%; bottom: 46px; width: 112px; height: 112px; margin-left: -56px; border-radius: 50%; transform: translateY(190px); transition: transform .5s cubic-bezier(.3,1.35,.5,1); }
+  .glass.up { transform: none; }
+  .glass .lens { position: absolute; inset: 0; border-radius: 50%; backdrop-filter: blur(10px) saturate(1.8) brightness(1.1); -webkit-backdrop-filter: blur(10px) saturate(1.8) brightness(1.1); background: radial-gradient(120% 90% at 30% 15%, rgba(255,255,255,.22), rgba(255,255,255,.05) 45%, rgba(255,255,255,.02) 70%), rgba(30,32,40,.25);
+    box-shadow: inset 0 1.5px 0 rgba(255,255,255,.55), inset 0 -1px 0 rgba(255,255,255,.18), inset 1px 0 0 rgba(255,255,255,.18), inset -1px 0 0 rgba(255,255,255,.1), inset 0 -14px 24px rgba(0,0,0,.25), 0 16px 34px rgba(0,0,0,.45); }
+  .glass .lens::after { content: ""; position: absolute; left: 18%; top: 7%; width: 46%; height: 22%; border-radius: 50%; background: radial-gradient(closest-side, rgba(255,255,255,.35), transparent); filter: blur(2px); }
+
+  /* The bin, drawn in layers so the picture can drop behind its front. */
+  .bin { position: absolute; left: 50%; top: 50%; width: 70px; height: 70px; margin: -37px 0 0 -35px; transform-origin: 50% 95%; }
+  .bin svg, .bin .lid { position: absolute; inset: 0; overflow: visible; }
+  .bin .lid { transform-origin: 50% 36%; transform: perspective(160px) rotateX(0deg); transition: transform .32s cubic-bezier(.3,1.5,.5,1); }
+  .bin.open .lid { transform: perspective(160px) translate(8px, -15px) rotate(24deg) rotateX(40deg); }
+  .bin .fall { position: absolute; z-index: 1; border-radius: 10px; overflow: hidden; }
+  .bin .front { z-index: 2; }
+  .bin .lid { z-index: 3; }
+  .puff { position: absolute; width: 5px; height: 5px; border-radius: 50%; background: rgba(255,255,255,.8); z-index: 4; }
+
+  .lifted { position: absolute; z-index: 5; width: 168px; height: 168px; left: calc(50% - 84px); top: 250px; border-radius: 18px; box-shadow: 0 20px 44px rgba(0,0,0,.55); }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="page">
+  <div class="copy">
+    <h1>Tacho de vidrio</h1>
+    <p>Reemplaza al tacho tipo emoji. Todo se dibuja con formas, así que en SwiftUI se arma igual.</p>
+    <ul>
+      <li><b>El tacho:</b> cuerpo metálico que se angosta hacia abajo, con estrías en relieve, borde enrollado arriba y sombra en el piso.</li>
+      <li><b>La tapa:</b> una cúpula con asa que se abre hacia atrás en 3D, como un tacho de pedal. Al abrir se ve la boca oscura.</li>
+      <li><b>La caída:</b> la miniatura cae dentro de la boca y desaparece detrás del frente del tacho. No se queda flotando encima.</li>
+      <li><b>El círculo:</b> vidrio líquido, el mismo material que los botones de la app. En el iPhone es el vidrio real de iOS 26; aquí está imitado.</li>
+    </ul>
+    <div class="controls"><button type="button" id="play">Eliminar</button></div>
+  </div>
+  <div class="phone" id="phone">
+    <div class="head">Descargas</div>
+    <div class="grid"><div class="tile t1"></div><div class="tile t2"></div><div class="tile t3"></div><div class="tile t4"></div><div class="tile t5"></div><div class="tile t6"></div></div>
+    <div class="glass" id="glass"><div class="lens"></div>
+      <div class="bin" id="bin">
+        <svg viewBox="0 0 70 70" aria-hidden="true">
+          <defs>
+            <linearGradient id="steel" x1="0" x2="1"><stop offset="0" stop-color="#5d636f"/><stop offset=".22" stop-color="#d9dde5"/><stop offset=".42" stop-color="#f4f6fa"/><stop offset=".7" stop-color="#a9afba"/><stop offset="1" stop-color="#5a606b"/></linearGradient>
+            <radialGradient id="hole" cx=".5" cy=".3" r=".8"><stop offset="0" stop-color="#05060a"/><stop offset="1" stop-color="#2a2e37"/></radialGradient>
+            <linearGradient id="rim" x1="0" x2="1"><stop offset="0" stop-color="#8a909b"/><stop offset=".35" stop-color="#ffffff"/><stop offset="1" stop-color="#7d838e"/></linearGradient>
+            <radialGradient id="floor" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="rgba(0,0,0,.55)"/><stop offset="1" stop-color="rgba(0,0,0,0)"/></radialGradient>
+          </defs>
+          <ellipse cx="35" cy="66" rx="20" ry="3.6" fill="url(#floor)"/>
+          <ellipse cx="35" cy="25" rx="21" ry="4.6" fill="url(#hole)"/>
+        </svg>
+        <svg class="front" viewBox="0 0 70 70" aria-hidden="true">
+          <path d="M14 25 Q35 30.6 56 25 L51.6 61.5 Q51.2 64.6 48 65 Q35 67 22 65 Q18.8 64.6 18.4 61.5 Z" fill="url(#steel)"/>
+          <g stroke-linecap="round" stroke-width="1.4" fill="none">
+            <path d="M24 32 L25.6 60 M31 33 L31.6 61.5 M39 33 L38.4 61.5 M46 32 L44.4 60" stroke="rgba(30,34,44,.35)"/>
+            <path d="M25 32 L26.6 60 M32 33 L32.6 61.5 M40 33 L39.4 61.5 M47 32 L45.4 60" stroke="rgba(255,255,255,.35)" stroke-width="1"/>
+          </g>
+          <path d="M14 25 Q35 30.6 56 25" fill="none" stroke="url(#rim)" stroke-width="3.2" stroke-linecap="round"/>
+        </svg>
+        <svg class="lid" viewBox="0 0 70 70" aria-hidden="true">
+          <path d="M12.5 24.6 Q14 15.5 35 14.5 Q56 15.5 57.5 24.6 Q35 30 12.5 24.6 Z" fill="url(#steel)"/>
+          <path d="M12.5 24.6 Q35 30 57.5 24.6" fill="none" stroke="url(#rim)" stroke-width="2.6" stroke-linecap="round"/>
+          <path d="M18 19.5 Q35 15 52 19.5" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="1.2" stroke-linecap="round"/>
+          <rect x="28" y="9" width="14" height="6.5" rx="3.2" fill="url(#steel)" stroke="rgba(40,44,54,.35)" stroke-width=".8"/>
+          <rect x="30.5" y="10.2" width="7" height="1.4" rx=".7" fill="rgba(255,255,255,.7)"/>
+        </svg>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const phone = document.getElementById('phone');
+  const glass = document.getElementById('glass');
+  const bin = document.getElementById('bin');
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const local = (el) => { const p = phone.getBoundingClientRect(), r = el.getBoundingClientRect(); return { x: r.left - p.left, y: r.top - p.top, w: r.width, h: r.height }; };
+  let busy = false;
+  document.getElementById('play').addEventListener('click', async () => {
+    if (busy) return; busy = true;
+    const tile = phone.querySelector('.tile');
+    tile.style.visibility = 'hidden';
+    const card = document.createElement('div'); card.className = 'lifted t1'; phone.append(card);
+    await wait(250);
+    glass.classList.add('up');
+    await wait(380);
+    bin.classList.add('open');
+    await wait(220);
+    // Arc into the mouth; the last stretch happens inside the bin so the front hides it.
+    const b = local(bin);
+    const mouth = { x: b.x + b.w / 2, y: b.y + b.h * 0.36 };
+    const c = local(card);
+    const start = { x: c.x + c.w / 2, y: c.y + c.h / 2 };
+    const peak = { x: (start.x + mouth.x) / 2 + 26, y: Math.min(start.y, mouth.y) - 40 };
+    await card.animate([
+      { left: `${start.x - 84}px`, top: `${start.y - 84}px`, width: '168px', height: '168px', transform: 'rotate(0deg)', borderRadius: '18px' },
+      { left: `${peak.x - 34}px`, top: `${peak.y - 34}px`, width: '68px', height: '68px', transform: 'rotate(-16deg)', borderRadius: '14px', offset: 0.5 },
+      { left: `${mouth.x - 13}px`, top: `${mouth.y - 13}px`, width: '26px', height: '26px', transform: 'rotate(-34deg)', borderRadius: '7px' },
+    ], { duration: 520, easing: 'cubic-bezier(.45,0,.55,1)', fill: 'forwards' }).finished;
+    // Hand the picture to the bin, between its mouth and its front, and drop it.
+    card.remove();
+    const fall = document.createElement('div'); fall.className = 'fall t1';
+    Object.assign(fall.style, { left: `${b.w / 2 - 13}px`, top: `${b.h * 0.36 - 13}px`, width: '26px', height: '26px', transform: 'rotate(-34deg)' });
+    bin.querySelector('.front').before(fall);
+    await fall.animate([{ transform: 'rotate(-34deg) translateY(0)' }, { transform: 'rotate(-50deg) translateY(26px) scale(.8)' }], { duration: 160, easing: 'ease-in', fill: 'forwards' }).finished;
+    fall.remove();
+    bin.querySelector('.lid').style.transition = 'transform .14s cubic-bezier(.6,0,.9,.5)';
+    bin.classList.remove('open');
+    await wait(130);
+    bin.querySelector('.lid').style.transition = '';
+    bin.animate([
+      { transform: 'none' },
+      { transform: 'scale(1.1, .86)', offset: 0.16 },
+      { transform: 'scale(.96, 1.06) rotate(-7deg)', offset: 0.4 },
+      { transform: 'rotate(5deg)', offset: 0.62 },
+      { transform: 'rotate(-2deg)', offset: 0.82 },
+      { transform: 'none' },
+    ], { duration: 640, easing: 'ease-out' });
+    [-1, -0.45, 0.45, 1].forEach((side, i) => {
+      const dot = document.createElement('div'); dot.className = 'puff';
+      dot.style.left = `${b.x + b.w / 2 + side * 20 - 2.5}px`; dot.style.top = `${b.y + b.h * 0.33}px`;
+      phone.append(dot);
+      dot.animate([{ transform: 'none', opacity: 0.9 }, { transform: `translate(${side * 16}px, ${-10 - (i % 2) * 7}px) scale(.3)`, opacity: 0 }], { duration: 460, easing: 'cubic-bezier(.2,.8,.4,1)', fill: 'forwards' }).finished.then(() => dot.remove());
+    });
+    await wait(900);
+    glass.classList.remove('up');
+    await wait(500);
+    tile.style.visibility = '';
+    busy = false;
+  });
+})();
+</script>

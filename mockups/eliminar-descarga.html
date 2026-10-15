@@ -1,0 +1,448 @@
+<meta charset="utf-8">
+<title>Eliminar una descarga</title>
+<style>
+  /* One phone, the Descargas page with the storage bar as filter. */
+  :root {
+    --bg: #eef0f4;
+    --fg: #1b1e26;
+    --muted: #5d6475;
+    --rule: #d5d9e2;
+    --accent: #6f63e8;
+    --control: #ffffff;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    --round: ui-rounded, "SF Pro Rounded", -apple-system, "Segoe UI", sans-serif;
+    --ph-bg: #111319;
+    --ph-fg: #f4f5f8;
+    --ph-muted: #8b90a0;
+    --ph-accent: #8c80ff;
+    --ph-danger: #ff6b6b;
+    --c-video: #8c80ff;
+    --c-audio: #5ec4b6;
+    --c-image: #f2b34f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #0b0c10; --fg: #e9ebf0; --muted: #959bab; --rule: #262a33; --accent: #9a90ff; --control: #1a1d24; color-scheme: dark; }
+  }
+  :root[data-theme="dark"] { --bg: #0b0c10; --fg: #e9ebf0; --muted: #959bab; --rule: #262a33; --accent: #9a90ff; --control: #1a1d24; color-scheme: dark; }
+
+  body { background: var(--bg); color: var(--fg); font-family: var(--font); padding: 24px 16px 40px; }
+  .page { max-width: 900px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); gap: 28px; align-items: start; }
+  @media (max-width: 720px) { .page { grid-template-columns: 1fr; justify-items: center; } }
+  .copy { display: grid; gap: 14px; max-width: 60ch; }
+  .copy h1 { font: 700 26px/1.15 var(--round); margin: 0; }
+  .copy p { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.5; }
+  .copy ol { margin: 0; padding-left: 20px; display: grid; gap: 8px; font-size: 15px; line-height: 1.45; }
+  .copy ol b { color: var(--fg); }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; }
+  .controls button { font: 600 14px var(--font); padding: 7px 13px; border-radius: 999px; border: 1px solid var(--rule); background: var(--control); color: var(--fg); cursor: pointer; }
+  .controls button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .phone { position: relative; width: 100%; max-width: 360px; aspect-ratio: 360 / 740; border-radius: 44px; overflow: hidden; background: var(--ph-bg); color: var(--ph-fg); box-shadow: 0 0 0 9px #050608, 0 18px 40px rgba(0,0,0,.28); isolation: isolate; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: none; }
+  .glow { position: absolute; width: 420px; height: 380px; left: -110px; top: -200px; border-radius: 50%; filter: blur(90px); opacity: .4; background: #5b4fd0; }
+  .ui { position: absolute; inset: 0; z-index: 1; padding: 0 18px; display: flex; flex-direction: column; gap: 14px; overflow: hidden; transition: filter .25s; }
+  .ui.dim { filter: blur(6px) brightness(.55); }
+  .status { height: 44px; flex: none; display: flex; align-items: center; justify-content: space-between; font: 600 15px var(--font); padding: 6px 10px 0; }
+  .status i { font-style: normal; font-size: 12px; }
+  .nav { display: grid; grid-template-columns: 42px 1fr 42px; align-items: center; flex: none; }
+  .nav h2 { margin: 0; text-align: center; font: 600 17px var(--font); }
+  .round { width: 42px; height: 42px; border-radius: 50%; background: rgba(255,255,255,.1); box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); display: grid; place-items: center; }
+  .round svg { width: 19px; height: 19px; }
+
+  .storage { display: grid; gap: 10px; flex: none; }
+  .total { display: flex; justify-content: space-between; align-items: baseline; }
+  .total b { font: 800 26px var(--round); font-variant-numeric: tabular-nums; }
+  .total span { color: var(--ph-muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .meter { display: flex; gap: 3px; height: 10px; }
+  .meter span { height: 100%; border-radius: 5px; transition: flex-grow .6s cubic-bezier(.3,1,.4,1); }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; }
+  .legend span { display: flex; gap: 6px; align-items: center; }
+  .legend i { width: 9px; height: 9px; border-radius: 50%; }
+  .legend small { color: var(--ph-muted); font-variant-numeric: tabular-nums; }
+
+  .scroll { display: grid; gap: 10px; align-content: start; position: relative; }
+  .day { font: 600 13px var(--font); color: var(--ph-muted); margin-top: 2px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .tile { display: grid; gap: 4px; cursor: pointer; }
+  .tile:focus-visible { outline: 2px solid var(--ph-accent); outline-offset: 3px; border-radius: 14px; }
+  .tile .pic { aspect-ratio: 1; border-radius: 14px; position: relative; overflow: hidden; transition: transform .25s; }
+  .tile.pressing .pic { transform: scale(.95); transition: transform .45s ease-out; }
+  .tile .tag { position: absolute; left: 7px; bottom: 7px; background: rgba(0,0,0,.55); color: #fff; font-size: 11px; padding: 2px 6px; border-radius: 6px; z-index: 2; }
+  .tile b { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tile small { color: var(--ph-muted); font-size: 11.5px; margin-top: -2px; font-variant-numeric: tabular-nums; }
+
+  /* The lifted tile and its menu, as iOS draws a context menu. */
+  .lift { position: absolute; z-index: 9; border-radius: 16px; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,.6); pointer-events: none; }
+  .lift.dragging { transition: width .2s cubic-bezier(.3,1.3,.5,1), height .2s cubic-bezier(.3,1.3,.5,1), border-radius .2s, transform .15s; }
+  .menu { position: absolute; z-index: 7; width: 230px; border-radius: 16px; background: rgba(44,47,58,.97); box-shadow: 0 18px 40px rgba(0,0,0,.5), inset 0 0 0 1px rgba(255,255,255,.08); overflow: hidden; transform-origin: 20% 0; }
+  .menu button { all: unset; cursor: pointer; display: flex; justify-content: space-between; align-items: center; width: calc(100% - 32px); padding: 12px 16px; font-size: 15.5px; }
+  .menu button + button { border-top: 1px solid rgba(255,255,255,.07); }
+  .menu button.danger { color: var(--ph-danger); }
+  .menu button svg { width: 18px; height: 18px; }
+  .menu button:focus-visible { outline: 2px solid var(--ph-accent); outline-offset: -2px; }
+  .shade { position: absolute; inset: 0; z-index: 5; }
+
+  /* The bin rises from the bottom edge; its lid hinges on the right. */
+  .bin { position: absolute; left: 50%; bottom: 34px; z-index: 8; width: 76px; height: 76px; margin-left: -38px; border-radius: 50%; display: grid; place-items: center; background: rgba(255,255,255,.1); box-shadow: inset 0 0 0 1px rgba(255,255,255,.14), 0 14px 30px rgba(0,0,0,.4); backdrop-filter: blur(14px); transform: translateY(150px); transition: transform .45s cubic-bezier(.3,1.35,.5,1), background .2s; pointer-events: none; }
+  .bin.up { transform: none; }
+  .bin.hot { background: rgba(255,107,107,.26); }
+  .bin.hot .can { transform: scale(1.14); }
+  .bin svg { width: 46px; height: 46px; overflow: visible; }
+  .bin .can { transform-origin: 24px 42px; transition: transform .25s cubic-bezier(.3,1.4,.5,1); }
+  .bin .lid { transform-box: fill-box; transform-origin: 100% 100%; transition: transform .22s cubic-bezier(.3,1.5,.5,1); }
+  .puff { position: absolute; z-index: 8; width: 5px; height: 5px; border-radius: 50%; background: rgba(255,255,255,.75); pointer-events: none; }
+
+  .ghost { position: absolute; z-index: 9; border-radius: 14px; overflow: hidden; pointer-events: none; }
+  .toast { position: absolute; left: 18px; right: 18px; bottom: 26px; z-index: 8; height: 50px; border-radius: 999px; background: rgba(44,47,58,.97); box-shadow: 0 12px 30px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.08); display: flex; align-items: center; gap: 10px; padding: 0 8px 0 18px; font-size: 14.5px; transform: translateY(90px); transition: transform .4s cubic-bezier(.3,1.3,.5,1); }
+  .toast.show { transform: none; }
+  .toast span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .toast button { all: unset; cursor: pointer; color: var(--ph-accent); font-weight: 600; padding: 8px 12px; border-radius: 999px; }
+  .toast button:focus-visible { outline: 2px solid var(--ph-accent); }
+  .toast .ring { width: 20px; height: 20px; flex: none; }
+
+  .art { background: linear-gradient(180deg, #ff8a5c, #c94b6d 45%, #5b2c6f 70%); }
+  .art::before { content: ""; position: absolute; width: 22%; aspect-ratio: 1; border-radius: 50%; background: #ffd27a; left: 60%; top: 20%; }
+  .art.food { background: radial-gradient(circle at 50% 55%, #f4c26b 0 22%, #b0532c 23% 34%, #6b3a22 35%); }
+  .art.food::before { display: none; }
+  .art.music { background: linear-gradient(135deg, #2b3a67, #7b6fd6); }
+  .art.music::before { background: none; border: 3px solid rgba(255,255,255,.7); left: 37%; top: 33%; }
+  .art.sea { background: linear-gradient(180deg, #7cc6e8, #2f7fb3 55%, #1c4f7a); }
+  .art.sea::before { background: #fff6cf; width: 14%; left: 20%; }
+  .art.city { background: linear-gradient(180deg, #23243a, #3e3263); }
+  .art.city::before { background: #f7e8a6; width: 12%; left: 70%; top: 14%; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="page">
+  <div class="copy">
+    <h1>Eliminar una descarga</h1>
+    <p>En la página Descargas, con la barra de espacio como filtro. Hay dos caminos y los dos terminan en el tacho.</p>
+    <ol>
+      <li><b>Menú.</b> Mantén presionada una miniatura y suéltala: sube con Compartir y Eliminar del iPhone. Al elegir Eliminar, el tacho sube desde abajo, abre la tapa, la miniatura cae dentro en arco y la tapa se cierra de golpe. El tacho se aplasta, se tambalea y suelta un poco de polvo.</li>
+      <li><b>Arrastrar.</b> Mantén presionada y, sin soltar, mueve el dedo. El menú se va, la miniatura se achica y sigue tu dedo, y aparece el tacho. Cuanto más te acercas, más se abre la tapa. Encima, el tacho se agranda y se pone rojo. Si sueltas ahí, cae dentro. Si sueltas en otro lado, vuelve a su lugar y el tacho baja con la tapa cerrada.</li>
+      <li>Al cerrarse la tapa, el tramo de su color en la barra se achica y el total baja contando. Las demás miniaturas se acomodan.</li>
+      <li><b>Deshacer</b> dura 5 segundos. Si lo tocas, el tacho vuelve a subir, abre la tapa y la miniatura salta afuera hasta su sitio.</li>
+    </ol>
+    <div class="controls"><button type="button" id="demo">Ver con el menú</button><button type="button" id="demoDrag">Ver arrastrando</button><button type="button" id="reset">Restaurar todo</button></div>
+  </div>
+  <div class="phone" id="phone"></div>
+</div>
+
+<script>
+(() => {
+  const TYPES = { video: { label: 'Videos', color: 'var(--c-video)' }, audio: { label: 'Audio', color: 'var(--c-audio)' }, image: { label: 'Fotos', color: 'var(--c-image)' } };
+  const START = [
+    { id: 1, title: 'Atardecer en Paracas', art: '', kind: 'video', tag: '▶ 4:12', mb: 120, day: 'Hoy' },
+    { id: 2, title: 'Lomo saltado en 10 min', art: 'food', kind: 'video', tag: '▶ 0:58', mb: 24, day: 'Hoy' },
+    { id: 3, title: 'Lo-fi para estudiar', art: 'music', kind: 'audio', tag: '♪ 1:02:10', mb: 58, day: 'Esta semana' },
+    { id: 4, title: 'Playa Máncora al amanecer', art: 'sea', kind: 'video', tag: '▶ 2:31', mb: 64, day: 'Esta semana' },
+    { id: 5, title: 'Lima de noche', art: 'city', kind: 'image', tag: 'Foto', mb: 2.1, day: 'Esta semana' },
+    { id: 6, title: 'Podcast · Historia del Perú', art: 'music', kind: 'audio', tag: '♪ 48:20', mb: 45, day: 'Octubre' },
+  ];
+  let items = START.map((s) => ({ ...s }));
+  const phone = document.getElementById('phone');
+  const mb = (v) => (v < 10 ? `${v.toFixed(1).replace('.', ',')} MB` : `${Math.round(v)} MB`);
+  const sum = (list, kind) => list.filter((s) => !kind || s.kind === kind).reduce((a, s) => a + s.mb, 0);
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  phone.innerHTML = `<div class="glow"></div><div class="ui" id="ui">
+    <div class="status"><span>3:59</span><i>●●● ᯤ 100%</i></div>
+    <div class="nav"><div class="round"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><path d="M15 5l-7 7 7 7"/></svg></div><h2>Descargas</h2><span></span></div>
+    <div class="storage"><div class="total"><b id="total"></b><span id="count"></span></div>
+      <div class="meter" id="meter">${Object.entries(TYPES).map(([k, t]) => `<span data-k="${k}" style="background:${t.color}"></span>`).join('')}</div>
+      <div class="legend">${Object.entries(TYPES).map(([k, t]) => `<span><i style="background:${t.color}"></i>${t.label} <small data-k="${k}"></small></span>`).join('')}</div></div>
+    <div class="scroll" id="scroll"></div>
+  </div>
+  <div class="bin" id="bin" aria-hidden="true"><svg viewBox="0 0 48 48"><defs><linearGradient id="binBody" x1="0" x2="1"><stop offset="0" stop-color="#e4e6ee"/><stop offset=".55" stop-color="#c3c7d3"/><stop offset="1" stop-color="#9da2b2"/></linearGradient></defs>
+    <g class="can"><path d="M13 19h22l-2.1 21.2a3 3 0 0 1-3 2.8H18.1a3 3 0 0 1-3-2.8z" fill="url(#binBody)"/>
+      <path d="M19.5 23.5l.6 15M24 23.5v15M28.5 23.5l-.6 15" stroke="rgba(40,44,60,.28)" stroke-width="1.6" stroke-linecap="round"/>
+      <g class="lid" id="lid"><path d="M20.5 14.2v-2.4a1.6 1.6 0 0 1 1.6-1.6h3.8a1.6 1.6 0 0 1 1.6 1.6v2.4" fill="none" stroke="#d9dce5" stroke-width="2"/><rect x="11" y="14" width="26" height="4.4" rx="2.2" fill="#eceef4"/></g></g></svg></div>
+  <div class="toast" id="toast"><svg class="ring" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="none" stroke="rgba(255,255,255,.15)" stroke-width="2.5"/><circle id="ringArc" cx="10" cy="10" r="8" fill="none" stroke="var(--ph-accent)" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="50.3" transform="rotate(-90 10 10)"/></svg><span id="toastText"></span><button type="button" id="undo">Deshacer</button></div>`;
+
+  const ui = document.getElementById('ui');
+  const scroll = document.getElementById('scroll');
+  const bin = document.getElementById('bin');
+  const lid = document.getElementById('lid');
+  const can = bin.querySelector('.can');
+  const toast = document.getElementById('toast');
+  let shown = sum(items);
+  let busy = false;
+
+  function drawStorage(animateTotal) {
+    document.querySelectorAll('#meter span').forEach((s) => { s.style.flexGrow = String(Math.max(sum(items, s.dataset.k), items.some((i) => i.kind === s.dataset.k) ? 5 : 0)); });
+    document.querySelectorAll('.legend small').forEach((s) => { s.textContent = mb(sum(items, s.dataset.k)); });
+    document.getElementById('count').textContent = `${items.length} archivos en el iPhone`;
+    const target = sum(items);
+    if (!animateTotal) { shown = target; document.getElementById('total').textContent = mb(shown); return; }
+    const from = shown, start = performance.now();
+    const step = (now) => {
+      const t = Math.min(1, (now - start) / 650);
+      shown = from + (target - from) * (1 - Math.pow(1 - t, 3));
+      document.getElementById('total').textContent = mb(shown);
+      if (t < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+
+  function drawGrid() {
+    const days = [...new Set(items.map((s) => s.day))];
+    scroll.innerHTML = days.map((d) => `<div class="day">${d}</div><div class="grid">${items.filter((s) => s.day === d).map((s) => `<div class="tile" tabindex="0" data-id="${s.id}" aria-label="${s.title}, ${mb(s.mb)}"><div class="pic art ${s.art}"><span class="tag">${s.tag}</span></div><b>${s.title}</b><small>${mb(s.mb)}</small></div>`).join('')}</div>`).join('');
+  }
+
+  // FLIP: remember where every tile was, redraw, then slide each from there.
+  function reflow(change) {
+    const before = new Map([...scroll.querySelectorAll('.tile')].map((t) => [t.dataset.id, t.getBoundingClientRect()]));
+    const dayBefore = new Map([...scroll.querySelectorAll('.day')].map((d) => [d.textContent, d.getBoundingClientRect()]));
+    change();
+    scroll.querySelectorAll('.tile').forEach((t) => {
+      const old = before.get(t.dataset.id);
+      if (!old) return;
+      const now = t.getBoundingClientRect();
+      const dx = old.left - now.left, dy = old.top - now.top;
+      if (dx || dy) t.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: 480, easing: 'cubic-bezier(.3,1.15,.4,1)' });
+    });
+    scroll.querySelectorAll('.day').forEach((d) => {
+      const old = dayBefore.get(d.textContent);
+      if (!old) { d.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 300 }); return; }
+      const dy = old.top - d.getBoundingClientRect().top;
+      if (dy) d.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 480, easing: 'cubic-bezier(.3,1.15,.4,1)' });
+    });
+  }
+
+  const local = (r) => { const p = phone.getBoundingClientRect(); return { left: r.left - p.left, top: r.top - p.top, width: r.width, height: r.height }; };
+  const px = (b) => ({ left: `${b.left}px`, top: `${b.top}px`, width: `${b.width}px`, height: `${b.height}px` });
+  const point = (e) => { const p = phone.getBoundingClientRect(); return { x: e.clientX - p.left, y: e.clientY - p.top }; };
+
+  // Bin geometry and moods.
+  // Resting position, so aiming works while the bin is still rising.
+  const centre = () => ({ x: bin.offsetLeft + bin.offsetWidth / 2, y: bin.offsetTop + bin.offsetHeight / 2 });
+  const mouth = () => { const c = centre(); return { x: c.x, y: c.y - 6 }; };
+  const setLid = (open) => { lid.style.transform = `rotate(${-open * 112}deg) translate(${open * 2}px, ${-open * 2}px)`; };
+  async function raiseBin() { if (bin.classList.contains('up')) return; bin.classList.add('up'); await wait(260); }
+  function lowerBin() { setLid(0); bin.classList.remove('up', 'hot'); }
+  function slam() {
+    lid.style.transition = 'transform .16s cubic-bezier(.6,0,.9,.4)';
+    setLid(0);
+    setTimeout(() => { lid.style.transition = ''; }, 170);
+    setTimeout(() => {
+      bin.classList.remove('hot');
+      can.animate([
+        { transform: 'none' },
+        { transform: 'scale(1.12, .84)', offset: 0.18 },
+        { transform: 'scale(.95, 1.07) rotate(-7deg)', offset: 0.42 },
+        { transform: 'rotate(5deg)', offset: 0.64 },
+        { transform: 'rotate(-2deg)', offset: 0.84 },
+        { transform: 'none' },
+      ], { duration: 620, easing: 'ease-out' });
+      const m = mouth();
+      [-1, -0.45, 0.45, 1].forEach((side, i) => {
+        const dot = document.createElement('div'); dot.className = 'puff';
+        dot.style.left = `${m.x + side * 15 - 2.5}px`; dot.style.top = `${m.y - 2}px`;
+        phone.append(dot);
+        dot.animate([
+          { transform: 'none', opacity: 0.9 },
+          { transform: `translate(${side * 16}px, ${-10 - (i % 2) * 6}px) scale(.3)`, opacity: 0 },
+        ], { duration: 460, easing: 'cubic-bezier(.2,.8,.4,1)', fill: 'forwards' }).finished.then(() => dot.remove());
+      });
+    }, 150);
+  }
+
+  // Long press opens the menu; moving the finger afterwards turns it into a drag.
+  let pressTimer = null;
+  let current = null;
+  scroll.addEventListener('pointerdown', (e) => {
+    const tile = e.target.closest('.tile');
+    if (!tile || busy) return;
+    tile.classList.add('pressing');
+    const at = point(e);
+    pressTimer = setTimeout(() => { tile.classList.remove('pressing'); openMenu(tile, at); }, 450);
+  });
+  const cancelPress = () => { clearTimeout(pressTimer); scroll.querySelectorAll('.pressing').forEach((t) => t.classList.remove('pressing')); };
+  scroll.addEventListener('pointerleave', cancelPress);
+  scroll.addEventListener('contextmenu', (e) => e.preventDefault());
+  scroll.addEventListener('keydown', (e) => { const tile = e.target.closest('.tile'); if (tile && !busy && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openMenu(tile, null); } });
+  window.addEventListener('pointermove', (e) => moveTo(point(e)));
+  window.addEventListener('pointerup', (e) => { cancelPress(); release(point(e)); });
+
+  function openMenu(tile, pressAt) {
+    busy = true;
+    const item = items.find((s) => String(s.id) === tile.dataset.id);
+    const from = local(tile.querySelector('.pic').getBoundingClientRect());
+    ui.classList.add('dim');
+    const shade = document.createElement('div'); shade.className = 'shade';
+    const lift = document.createElement('div'); lift.className = `lift art ${item.art}`;
+    const size = Math.min(220, phone.clientWidth - 80);
+    const to = { left: (phone.clientWidth - size) / 2, top: Math.max(70, Math.min(from.top - 20, phone.clientHeight - size - 190)), width: size, height: size };
+    Object.assign(lift.style, px(to));
+    lift.animate([{ ...px(from), borderRadius: '14px' }, { ...px(to), borderRadius: '16px' }], { duration: 380, easing: 'cubic-bezier(.3,1.3,.5,1)' });
+    const menu = document.createElement('div'); menu.className = 'menu'; menu.setAttribute('role', 'menu');
+    menu.style.left = `${to.left}px`; menu.style.top = `${to.top + size + 12}px`;
+    menu.innerHTML = `<button role="menuitem" type="button" data-a="share">Compartir<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7.5 7.5L12 3l4.5 4.5"/><path d="M5 12v6a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-6"/></svg></button><button role="menuitem" type="button" class="danger" data-a="delete">Eliminar del iPhone<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button>`;
+    menu.animate([{ opacity: 0, transform: 'scale(.85)' }, { opacity: 1, transform: 'none' }], { duration: 260, delay: 80, easing: 'cubic-bezier(.3,1.3,.5,1)', fill: 'backwards' });
+    phone.append(shade, lift, menu);
+    tile.style.visibility = 'hidden';
+    if (!pressAt) menu.querySelector('button').focus({ preventScroll: true });
+    current = { item, tile, lift, menu, shade, from, held: !!pressAt, pressAt, dragging: false };
+    shade.addEventListener('click', () => closeMenu(false));
+    menu.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) closeMenu(b.dataset.a === 'delete'); });
+  }
+
+  function dismissChrome({ menu, shade }) {
+    menu.animate([{ opacity: 1 }, { opacity: 0, transform: 'scale(.9)' }], { duration: 160, fill: 'forwards' }).finished.then(() => menu.remove());
+    shade.remove();
+    ui.classList.remove('dim');
+  }
+
+  async function closeMenu(deleting) {
+    if (!current || current.dragging) return;
+    const c = current; current = null;
+    dismissChrome(c);
+    if (deleting) { await throwAway(c.item, c.lift); return; }
+    await c.lift.animate([{ ...px(local(c.lift.getBoundingClientRect())) }, { ...px(c.from), borderRadius: '14px' }], { duration: 320, easing: 'cubic-bezier(.3,1.1,.5,1)' }).finished;
+    c.lift.remove(); c.tile.style.visibility = ''; busy = false;
+  }
+
+  // Dragging: the lift shrinks under the finger, the lid opens as it nears the bin.
+  const DRAG = 118;
+  function moveTo(p) {
+    const c = current;
+    if (!c || !c.held) return;
+    if (!c.dragging) {
+      if (Math.hypot(p.x - c.pressAt.x, p.y - c.pressAt.y) < 12) return;
+      c.dragging = true;
+      dismissChrome(c);
+      c.lift.getAnimations().forEach((a) => a.cancel());
+      c.lift.classList.add('dragging');
+      raiseBin();
+    }
+    Object.assign(c.lift.style, px({ left: p.x - DRAG / 2, top: p.y - DRAG / 2, width: DRAG, height: DRAG }));
+    const b = centre();
+    const dist = Math.hypot(p.x - b.x, p.y - b.y);
+    const near = dist < 70;
+    setLid(Math.max(0, Math.min(1, 1 - (dist - 60) / 200)));
+    bin.classList.toggle('hot', near);
+    c.lift.style.transform = near ? 'scale(.7) rotate(-6deg)' : `rotate(${Math.max(-8, Math.min(8, (p.x - b.x) / 25))}deg)`;
+    c.lift.style.borderRadius = near ? '24px' : '16px';
+  }
+
+  async function release(p) {
+    const c = current;
+    if (!c || !c.held) return;
+    c.held = false;
+    if (!c.dragging) return; // a plain long press leaves the menu open
+    current = null;
+    c.lift.classList.remove('dragging');
+    c.lift.style.transform = '';
+    const b = centre();
+    if (Math.hypot(p.x - b.x, p.y - b.y) < 70) { await throwAway(c.item, c.lift, true); return; }
+    lowerBin();
+    await c.lift.animate([{ ...px(local(c.lift.getBoundingClientRect())) }, { ...px(c.from), borderRadius: '14px' }], { duration: 380, easing: 'cubic-bezier(.3,1.25,.5,1)' }).finished;
+    c.lift.remove(); c.tile.style.visibility = ''; busy = false;
+  }
+
+  // Into the bin: lid opens, the tile arcs in, the lid slams, the storage bar shrinks.
+  let pending = null;
+  async function throwAway(item, lift, fromDrag) {
+    lift.style.boxShadow = 'none';
+    await raiseBin();
+    setLid(1);
+    await wait(fromDrag ? 60 : 170);
+    const start = local(lift.getBoundingClientRect());
+    const m = mouth();
+    const end = { left: m.x - 8, top: m.y - 6, width: 16, height: 16 };
+    const peak = { left: (start.left + end.left) / 2 + (end.left - start.left) * 0.15, top: Math.min(start.top, end.top - 70) - (fromDrag ? 10 : 40), width: Math.max(28, start.width * 0.42), height: Math.max(28, start.width * 0.42) };
+    reflow(() => { items = items.filter((s) => s !== item); drawGrid(); });
+    await lift.animate([
+      { ...px(start), borderRadius: '16px', transform: 'rotate(0deg)', opacity: 1 },
+      { ...px(peak), borderRadius: '30%', transform: 'rotate(-14deg)', opacity: 1, offset: 0.5 },
+      { ...px(end), borderRadius: '30%', transform: 'rotate(-30deg)', opacity: 0.9 },
+    ], { duration: fromDrag ? 300 : 560, easing: 'cubic-bezier(.45,0,.55,1)', fill: 'forwards' }).finished;
+    lift.remove();
+    slam();
+    const seg = document.querySelector(`#meter span[data-k="${item.kind}"]`);
+    seg.animate([{ transform: 'scaleY(1)' }, { transform: 'scaleY(2.2)' }, { transform: 'scaleY(1)' }], { duration: 380, easing: 'ease-out' });
+    drawStorage(true);
+    await wait(760);
+    lowerBin();
+    await wait(200);
+    busy = false;
+    showUndo(item);
+  }
+
+  function showUndo(item) {
+    if (pending) clearTimeout(pending.timer);
+    document.getElementById('toastText').textContent = `${item.title} eliminado`;
+    toast.classList.add('show');
+    const arc = document.getElementById('ringArc');
+    arc.getAnimations().forEach((a) => a.cancel());
+    arc.animate([{ strokeDashoffset: 0 }, { strokeDashoffset: 50.3 }], { duration: 5000, fill: 'forwards' });
+    pending = { item, timer: setTimeout(() => { toast.classList.remove('show'); pending = null; }, 5000) };
+  }
+
+  document.getElementById('undo').addEventListener('click', async () => {
+    if (!pending || busy) return;
+    busy = true;
+    const { item } = pending;
+    clearTimeout(pending.timer); pending = null;
+    toast.classList.remove('show');
+    await raiseBin();
+    setLid(1);
+    await wait(200);
+    reflow(() => { const kept = new Set([...items.map((s) => s.id), item.id]); items = START.filter((s) => kept.has(s.id)).map((s) => items.find((x) => x.id === s.id) || item); drawGrid(); });
+    const tile = scroll.querySelector(`[data-id="${item.id}"]`);
+    tile.style.visibility = 'hidden';
+    const target = local(tile.querySelector('.pic').getBoundingClientRect());
+    const m = mouth();
+    const ghost = document.createElement('div'); ghost.className = `ghost art ${item.art}`;
+    phone.append(ghost);
+    drawStorage(true);
+    setTimeout(() => { setLid(0); }, 260);
+    setTimeout(lowerBin, 620);
+    await ghost.animate([
+      { left: `${m.x - 8}px`, top: `${m.y - 6}px`, width: '16px', height: '16px', borderRadius: '30%', transform: 'rotate(-30deg)' },
+      { left: `${(m.x + target.left) / 2}px`, top: `${Math.min(m.y, target.top) - 60}px`, width: `${target.width * 0.5}px`, height: `${target.height * 0.5}px`, borderRadius: '24%', transform: 'rotate(8deg)', offset: 0.5 },
+      { ...px(target), borderRadius: '14px', transform: 'none' },
+    ], { duration: 620, easing: 'cubic-bezier(.35,0,.3,1.1)', fill: 'forwards' }).finished;
+    ghost.remove(); tile.style.visibility = ''; busy = false;
+  });
+
+  // Demos drive the same handlers a finger would.
+  document.getElementById('demo').addEventListener('click', () => {
+    const tile = scroll.querySelector('.tile');
+    if (!tile || busy) return;
+    openMenu(tile, null);
+    setTimeout(() => phone.querySelector('.menu [data-a="delete"]')?.click(), 1100);
+  });
+  document.getElementById('demoDrag').addEventListener('click', async () => {
+    const tile = scroll.querySelector('.tile');
+    if (!tile || busy) return;
+    const r = local(tile.querySelector('.pic').getBoundingClientRect());
+    const a = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    openMenu(tile, a);
+    await wait(700);
+    moveTo({ x: a.x, y: a.y + 14 });
+    await wait(250);
+    const b = centre();
+    const t0 = performance.now(), length = 1300;
+    await new Promise((done) => {
+      const step = (now) => {
+        const t = Math.min(1, (now - t0) / length);
+        const e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+        moveTo({ x: a.x + (b.x - a.x) * e + Math.sin(t * Math.PI) * 40, y: a.y + (b.y - a.y) * e });
+        if (t < 1) requestAnimationFrame(step); else done();
+      };
+      requestAnimationFrame(step);
+    });
+    await wait(350);
+    release(b);
+  });
+  document.getElementById('reset').addEventListener('click', () => {
+    if (busy) return;
+    items = START.map((s) => ({ ...s }));
+    toast.classList.remove('show');
+    if (pending) { clearTimeout(pending.timer); pending = null; }
+    drawGrid(); drawStorage(false);
+  });
+
+  drawGrid(); drawStorage(false);
+})();
+</script>

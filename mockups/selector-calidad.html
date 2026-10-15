@@ -1,0 +1,234 @@
+<meta charset="utf-8">
+<title>Selector de calidad</title>
+<style>
+  /* Three phones with the same video; only the quality control changes. */
+  :root {
+    --bg: #eef0f4;
+    --fg: #1b1e26;
+    --muted: #5d6475;
+    --rule: #d5d9e2;
+    --accent: #6f63e8;
+    --control: #ffffff;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    --round: ui-rounded, "SF Pro Rounded", -apple-system, "Segoe UI", sans-serif;
+    --ph-bg: #111319;
+    --ph-fg: #f4f5f8;
+    --ph-muted: #8b90a0;
+    --ph-rule: #2a2e38;
+    --ph-field: #23262f;
+    --ph-accent: #8c80ff;
+    --ph-accent-ink: #14121f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #0b0c10; --fg: #e9ebf0; --muted: #959bab; --rule: #262a33; --accent: #9a90ff; --control: #1a1d24; color-scheme: dark; }
+  }
+  :root[data-theme="dark"] { --bg: #0b0c10; --fg: #e9ebf0; --muted: #959bab; --rule: #262a33; --accent: #9a90ff; --control: #1a1d24; color-scheme: dark; }
+
+  body { background: var(--bg); color: var(--fg); font-family: var(--font); padding: 24px 16px 40px; }
+  .page { max-width: 1180px; margin: 0 auto; display: grid; gap: 22px; }
+  header h1 { font: 700 26px/1.15 var(--round); margin: 0; }
+  header p { margin: 6px 0 0; color: var(--muted); font-size: 15px; max-width: 62ch; }
+  .phones { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 28px; justify-items: center; }
+  figure { margin: 0; display: grid; gap: 10px; justify-items: center; width: 100%; max-width: 360px; }
+  figcaption { text-align: center; }
+  figcaption b { display: block; font: 700 17px var(--round); }
+  figcaption span { color: var(--muted); font-size: 13.5px; }
+
+  .phone { position: relative; width: 100%; max-width: 360px; aspect-ratio: 360 / 640; border-radius: 44px; overflow: hidden; background: var(--ph-bg); color: var(--ph-fg); box-shadow: 0 0 0 9px #050608, 0 18px 40px rgba(0,0,0,.28); isolation: isolate; user-select: none; }
+  .glow { position: absolute; width: 420px; height: 380px; left: -110px; top: -200px; border-radius: 50%; background: #c0443a; filter: blur(90px); opacity: .42; }
+  .ui { position: absolute; inset: 0; z-index: 1; padding: 0 18px; display: flex; flex-direction: column; gap: 14px; }
+  .status { height: 44px; display: flex; align-items: center; justify-content: space-between; font: 600 15px var(--font); padding: 6px 10px 0; }
+  .status i { font-style: normal; font-size: 12px; }
+  .thumb { width: 100%; aspect-ratio: 16 / 9; border-radius: 14px; margin-top: 8px; background:
+      radial-gradient(circle at 70% 38%, #ffd27a 0 7%, transparent 7.5%),
+      linear-gradient(180deg, transparent 58%, #2c1d3b 58% 64%, #1a1328 64%),
+      linear-gradient(180deg, #ff8a5c, #c94b6d 45%, #5b2c6f 70%); }
+  .meta h3 { margin: 0; font: 600 16.5px/1.25 var(--font); }
+  .meta p { margin: 3px 0 0; color: var(--ph-muted); font-size: 13.5px; }
+  .seg { display: grid; grid-template-columns: 1fr 1fr; background: var(--ph-field); border-radius: 9px; padding: 2px; font-size: 13.5px; text-align: center; }
+  .seg span { padding: 6px; border-radius: 7px; }
+  .seg .on { background: #4a4e5a; font-weight: 600; }
+  /* Format picker A: icons with what each one saves. */
+  .choices { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; }
+  .choice { all: unset; cursor: pointer; display: grid; justify-items: center; gap: 4px; padding: 4px 4px 2px; color: var(--ph-muted); }
+  .choice .ic { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: rgba(255,255,255,.06); transition: background .25s, color .25s, transform .35s cubic-bezier(.3,1.6,.5,1); }
+  .choice b { font-size: 13.5px; font-weight: 600; color: var(--ph-fg); }
+  .choice small { font-size: 11px; }
+  .choice[aria-checked="true"] .ic { background: var(--ph-accent); color: var(--ph-accent-ink); transform: scale(1.06); }
+  .choice[aria-checked="true"] b { color: var(--ph-accent); }
+  .choice:focus-visible { outline: 2px solid var(--ph-accent); }
+  svg.i { width: 20px; height: 20px; }
+  .quality { display: grid; gap: 10px; transition: opacity .25s, transform .3s; }
+  .quality.hide { opacity: 0; transform: translateY(-6px); pointer-events: none; }
+  .bar { position: absolute; left: 50%; transform: translateX(-50%); bottom: 24px; height: 50px; width: 240px; border-radius: 999px; z-index: 3; background: var(--ph-accent); color: var(--ph-accent-ink); display: flex; align-items: center; justify-content: center; font: 600 16.5px var(--font); }
+  .label { display: flex; justify-content: space-between; align-items: baseline; padding: 0 4px; }
+  .label span { font-size: 15px; }
+  .label small { color: var(--ph-muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+
+  /* A: chips in one row that scrolls sideways when there are many. */
+  .chips { display: flex; gap: 8px; overflow-x: auto; padding: 2px 4px 4px; scrollbar-width: none; }
+  .chip { all: unset; cursor: pointer; flex: none; padding: 8px 14px; border-radius: 999px; font: 600 14.5px var(--font); font-variant-numeric: tabular-nums; color: var(--ph-fg); background: rgba(255,255,255,.07); transition: background .2s, color .2s, transform .3s cubic-bezier(.3,1.6,.5,1); }
+  .chip small { display: block; font-size: 10.5px; font-weight: 500; color: var(--ph-muted); text-align: center; }
+  .chip[aria-checked="true"] { background: var(--ph-accent); color: var(--ph-accent-ink); transform: scale(1.04); }
+  .chip[aria-checked="true"] small { color: rgba(20,18,31,.7); }
+  .chip:focus-visible { outline: 2px solid var(--ph-accent); outline-offset: 2px; }
+
+  /* B: a track with one stop per quality; drag or tap, it snaps. */
+  .ruler { position: relative; height: 64px; margin: 0 12px; touch-action: none; cursor: pointer; }
+  .ruler .track { position: absolute; left: 0; right: 0; top: 14px; height: 6px; border-radius: 3px; background: rgba(255,255,255,.1); }
+  .ruler .fill { position: absolute; left: 0; top: 14px; height: 6px; border-radius: 3px; background: var(--ph-accent); }
+  .ruler .stop { position: absolute; top: 13px; width: 8px; height: 8px; margin-left: -4px; border-radius: 50%; background: #5b5f6b; }
+  .ruler .stop.lit { background: var(--ph-accent-ink); opacity: .55; }
+  .ruler .tick { position: absolute; top: 32px; transform: translateX(-50%); font-size: 11.5px; color: var(--ph-muted); font-variant-numeric: tabular-nums; transition: color .2s; }
+  .ruler .tick.on { color: var(--ph-fg); font-weight: 600; }
+  .ruler .knob { position: absolute; top: 5px; width: 24px; height: 24px; margin-left: -12px; border-radius: 50%; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.4); }
+  .ruler.snap .knob, .ruler.snap .fill { transition: left .32s cubic-bezier(.3,1.5,.5,1), width .32s cubic-bezier(.3,1.5,.5,1); }
+  .ruler:focus-visible { outline: 2px solid var(--ph-accent); outline-offset: 4px; border-radius: 8px; }
+
+  /* C: the value itself is the control; arrows or a sideways swipe step it. */
+  .stepper { display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; padding: 0 4px; }
+  .stepper button { all: unset; cursor: pointer; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; color: var(--ph-fg); background: rgba(255,255,255,.07); font-size: 18px; transition: opacity .2s; }
+  .stepper button:disabled { opacity: .25; cursor: default; }
+  .stepper button:focus-visible { outline: 2px solid var(--ph-accent); }
+  .stepper .value { position: relative; height: 62px; overflow: hidden; text-align: center; touch-action: pan-y; cursor: grab; }
+  .stepper .reel { position: absolute; inset: 0; display: flex; transition: transform .4s cubic-bezier(.3,1.25,.5,1); }
+  .stepper .cell { flex: 0 0 100%; display: grid; place-content: center; }
+  .stepper .cell b { font: 800 30px/1 var(--round); font-variant-numeric: tabular-nums; }
+  .stepper .cell small { color: var(--ph-accent); font-size: 12.5px; font-weight: 600; margin-top: 4px; }
+  .stepper .dots { display: flex; gap: 5px; justify-content: center; margin-top: 6px; grid-column: 1 / -1; }
+  .stepper .dots i { width: 5px; height: 5px; border-radius: 50%; background: rgba(255,255,255,.18); transition: background .2s, width .25s; }
+  .stepper .dots i.on { background: var(--ph-accent); width: 14px; border-radius: 3px; }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="page">
+  <header>
+    <h1>Selector de calidad</h1>
+    <p>Tres reemplazos para el menú de Calidad, junto al selector de formato con iconos. La calidad solo aparece con Video, y la elegida se muestra bajo su icono. Pruébalos dentro de cada teléfono.</p>
+  </header>
+  <div class="phones">
+    <figure><div class="phone" data-variant="chips"></div><figcaption><b>A · Fichas</b><span>Todas las calidades a la vista, con su nombre corto debajo. Si hay muchas, la fila se desliza de lado.</span></figcaption></figure>
+    <figure><div class="phone" data-variant="ruler"></div><figcaption><b>B · Regla</b><span>Una barra con una parada por calidad. Arrastra la bolita o toca una marca; se acomoda sola en la más cercana.</span></figcaption></figure>
+    <figure><div class="phone" data-variant="stepper"></div><figcaption><b>C · Valor grande</b><span>La calidad elegida en grande. Las flechas o un deslizamiento de lado la cambian, y los puntos dicen dónde estás.</span></figcaption></figure>
+  </div>
+</div>
+
+<script>
+(() => {
+  const Q = [
+    { h: 2160, name: '4K' }, { h: 1440, name: '2K' }, { h: 1080, name: 'Full HD' },
+    { h: 720, name: 'HD' }, { h: 480, name: 'SD' }, { h: 360, name: 'Ligera' },
+  ];
+  const label = (q) => `${q.h}p`;
+
+  const shell = `<div class="glow"></div><div class="ui">
+    <div class="status"><span>3:59</span><i>●●● ᯤ 100%</i></div>
+    <div class="thumb"></div>
+    <div class="meta"><h3>Atardecer en Paracas · timelapse 4K</h3><p>Viajes del Sur · 4:12</p></div>
+    <div class="choices" role="radiogroup" aria-label="Formato">
+      <button class="choice" role="radio" aria-checked="true" data-mode="video"><span class="ic"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 9h18M3 15h18M8 5v4M16 5v4M8 15v4M16 15v4"/></svg></span><b>Video</b><small class="vdetail">1080p · MP4</small></button>
+      <button class="choice" role="radio" aria-checked="false" data-mode="audio"><span class="ic"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18V5l11-2v13"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/></svg></span><b>Audio</b><small>M4A</small></button>
+      <button class="choice" role="radio" aria-checked="false" data-mode="thumbnail"><span class="ic"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="6" y="3" width="15" height="12" rx="2.5"/><path d="M3 8v10a3 3 0 0 0 3 3h10"/></svg></span><b>Miniatura</b><small>JPG</small></button>
+    </div>
+    <div class="quality">
+      <div class="label"><span>Calidad</span><small></small></div>
+      <div class="control"></div>
+    </div>
+  </div><div class="bar">↓ Descargar</div>`;
+
+  document.querySelectorAll('.phone').forEach((phone) => {
+    phone.innerHTML = shell;
+    const control = phone.querySelector('.control');
+    const caption = phone.querySelector('.label small');
+    let index = 2;
+    const variant = phone.dataset.variant;
+    // The format icons: quality only applies to video.
+    const quality = phone.querySelector('.quality');
+    phone.querySelector('.choices').addEventListener('click', (e) => {
+      const pick = e.target.closest('.choice');
+      if (!pick) return;
+      phone.querySelectorAll('.choice').forEach((c) => c.setAttribute('aria-checked', String(c === pick)));
+      quality.classList.toggle('hide', pick.dataset.mode !== 'video');
+    });
+    const showQuality = (q) => { phone.querySelector('.vdetail').textContent = `${label(q)} · MP4`; };
+
+    if (variant === 'chips') {
+      control.innerHTML = `<div class="chips" role="radiogroup" aria-label="Calidad">${Q.map((q, i) => `<button class="chip" role="radio" data-i="${i}">${label(q)}<small>${q.name}</small></button>`).join('')}</div>`;
+      const update = () => {
+        control.querySelectorAll('.chip').forEach((c, i) => c.setAttribute('aria-checked', String(i === index)));
+        caption.textContent = '';
+        showQuality(Q[index]);
+      };
+      control.addEventListener('click', (e) => { const c = e.target.closest('.chip'); if (c) { index = Number(c.dataset.i); update(); } });
+      update();
+    }
+
+    if (variant === 'ruler') {
+      // Best quality on the right, like a volume control: right is more.
+      const order = [...Q].reverse();
+      control.innerHTML = `<div class="ruler snap" tabindex="0" role="slider" aria-label="Calidad" aria-valuemin="0" aria-valuemax="${Q.length - 1}"><div class="track"></div><div class="fill"></div>${order.map((q, i) => `<span class="stop" style="left:${(i / (order.length - 1)) * 100}%"></span><span class="tick" style="left:${(i / (order.length - 1)) * 100}%">${q.h}</span>`).join('')}<div class="knob"></div></div>`;
+      const ruler = control.querySelector('.ruler');
+      let pos = order.length - 1 - index;
+      const draw = (fraction) => {
+        ruler.querySelector('.knob').style.left = `${fraction * 100}%`;
+        ruler.querySelector('.fill').style.width = `${fraction * 100}%`;
+        const nearest = Math.round(fraction * (order.length - 1));
+        ruler.querySelectorAll('.tick').forEach((t, i) => t.classList.toggle('on', i === nearest));
+        ruler.querySelectorAll('.stop').forEach((s, i) => s.classList.toggle('lit', i < nearest));
+        const q = order[nearest];
+        caption.textContent = `${label(q)} · ${q.name}`;
+        showQuality(q);
+        ruler.setAttribute('aria-valuenow', String(nearest));
+        ruler.setAttribute('aria-valuetext', `${label(q)}, ${q.name}`);
+      };
+      const settle = () => { ruler.classList.add('snap'); draw(pos / (order.length - 1)); };
+      const at = (x) => { const r = ruler.getBoundingClientRect(); return Math.min(1, Math.max(0, (x - r.left) / r.width)); };
+      ruler.addEventListener('pointerdown', (e) => {
+        ruler.setPointerCapture(e.pointerId);
+        ruler.classList.remove('snap');
+        draw(at(e.clientX));
+        const move = (ev) => draw(at(ev.clientX));
+        const up = (ev) => { pos = Math.round(at(ev.clientX) * (order.length - 1)); settle(); ruler.removeEventListener('pointermove', move); ruler.removeEventListener('pointerup', up); };
+        ruler.addEventListener('pointermove', move);
+        ruler.addEventListener('pointerup', up);
+      });
+      ruler.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowRight') pos = Math.min(order.length - 1, pos + 1);
+        else if (e.key === 'ArrowLeft') pos = Math.max(0, pos - 1);
+        else return;
+        e.preventDefault(); settle();
+      });
+      settle();
+    }
+
+    if (variant === 'stepper') {
+      control.innerHTML = `<div class="stepper"><button type="button" class="prev" aria-label="Más calidad">‹</button><div class="value" aria-live="polite"><div class="reel">${Q.map((q) => `<div class="cell"><b>${label(q)}</b><small>${q.name}</small></div>`).join('')}</div></div><button type="button" class="next" aria-label="Menos calidad">›</button><div class="dots">${Q.map(() => '<i></i>').join('')}</div></div>`;
+      const reel = control.querySelector('.reel');
+      // The reel runs from best (left) to lightest (right); the arrows move along it.
+      const update = () => {
+        reel.style.transform = `translateX(${-index * 100}%)`;
+        control.querySelector('.prev').disabled = index === 0;
+        control.querySelector('.next').disabled = index === Q.length - 1;
+        control.querySelectorAll('.dots i').forEach((d, i) => d.classList.toggle('on', i === index));
+        caption.textContent = '';
+        showQuality(Q[index]);
+      };
+      control.querySelector('.prev').addEventListener('click', () => { index = Math.max(0, index - 1); update(); });
+      control.querySelector('.next').addEventListener('click', () => { index = Math.min(Q.length - 1, index + 1); update(); });
+      const value = control.querySelector('.value');
+      let startX = null;
+      value.addEventListener('pointerdown', (e) => { startX = e.clientX; value.setPointerCapture(e.pointerId); reel.style.transition = 'none'; });
+      value.addEventListener('pointermove', (e) => { if (startX == null) return; const dx = e.clientX - startX; reel.style.transform = `translateX(calc(${-index * 100}% + ${dx}px))`; });
+      value.addEventListener('pointerup', (e) => {
+        if (startX == null) return;
+        const dx = e.clientX - startX; startX = null; reel.style.transition = '';
+        if (dx < -30) index = Math.min(Q.length - 1, index + 1);
+        if (dx > 30) index = Math.max(0, index - 1);
+        update();
+      });
+      update();
+    }
+  });
+})();
+</script>

@@ -5,14 +5,14 @@ import { Button as NativeButton, Divider, HStack, Menu, Section, Toggle, Image a
 import { accessibilityLabel, accessibilityAddTraits, accessibilityElement, accessibilityHidden, accessibilityValue, animation, Animation, blur, clipped, buttonStyle, clipShape, contentShape, controlSize, disabled, font, frame, glassEffect, autocorrectionDisabled, contentTransition, scaleEffect, keyboardType, textInputAutocapitalization, lineLimit, listRowInsets, menuIndicator, monospacedDigit, onSubmit, offset, onGeometryChange, onTapGesture, opacity, padding, pickerStyle, resizable, scrollDismissesKeyboard, shadow, shapes, submitLabel, symbolEffect, tag, textFieldStyle, type ViewModifier } from '@expo/ui/swift-ui/modifiers';
 import type { SFSymbol } from 'sf-symbols-typescript';
 import { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
-import { Image as RNImage, Pressable, ScrollView as ScrollViewRN, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { AppState, Image as RNImage, Pressable, ScrollView as ScrollViewRN, StyleSheet, useWindowDimensions, View } from 'react-native';
 import FontAwesome6 from '@expo/vector-icons/FontAwesome6';
 import * as Clipboard from 'expo-clipboard';
 import { Asset } from 'expo-asset';
 import { useEvent } from 'expo';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { UI } from '../ui-structure';
-import { analyzeUrl, checkDownloader, LOCAL_DOWNLOADER, downloaderUrl, loadDownloaderUrl, normalizeServerUrl, saveDownloaderUrl, deleteLocalFile, detectDownloadSource, DownloadCancelledError, downloaderErrorMessage, fileExists, fileSize, formatBytes, formatDuration, loadDownloadHistory, saveDownloadHistory, shareFile, sourceForKey, startDownload, type DownloadAnalysis, type DownloadHistoryItem, type DownloadItem, type DownloadMode, type DownloadQuality, type DownloadTask, type SourceKey } from '../downloader-api';
+import { analyzeUrl, checkDownloader, LOCAL_DOWNLOADER, downloaderUrl, loadDownloaderUrl, normalizeServerUrl, saveDownloaderUrl, deleteLocalFile, detectDownloadSource, DownloadCancelledError, downloaderErrorMessage, fileExists, fileSize, formatBytes, formatDuration, takeBackgroundDownloads, loadDownloadHistory, saveDownloadHistory, shareFile, sourceForKey, startDownload, type DownloadAnalysis, type DownloadHistoryItem, type DownloadItem, type DownloadMode, type DownloadQuality, type DownloadTask, type SourceKey } from '../downloader-api';
 import { background, foregroundStyle, tint } from '../native-colors';
 import { LiquidProgress, PopIn, TrashDrop } from '../modules/superapp-native/animations';
 import { DownloadsPageNative, SavedCountBadgeNative, SavedShelfNative, UndoBarNative } from './downloads';
@@ -696,7 +696,7 @@ function FlightNative({ flight, pageWidth }: { flight: Flight; pageWidth: number
 /** A link shared to the app from another app's share sheet. */
 export type SharedLink = { url: string; nonce: number };
 
-export function DownloaderNative({ tokens, dataSaver, onDataSaverChange, onBack, sharedLink, onSharedLinkHandled }: { tokens: ThemeTokens; dataSaver: boolean; onDataSaverChange: (value: boolean) => void; onBack: () => void; sharedLink?: SharedLink | null; onSharedLinkHandled?: () => void }) {
+export function DownloaderNative({ tokens, dataSaver, onDataSaverChange, onBack, sharedLink, onSharedLinkHandled, openDownloads = 0 }: { tokens: ThemeTokens; dataSaver: boolean; onDataSaverChange: (value: boolean) => void; onBack: () => void; sharedLink?: SharedLink | null; onSharedLinkHandled?: () => void; openDownloads?: number }) {
   const urlState = useNativeState('');
   const urlRef = useRef('');
   const urlInput = useRef<TextFieldRef>(null);
@@ -757,17 +757,40 @@ export function DownloaderNative({ tokens, dataSaver, onDataSaverChange, onBack,
     void saveDownloadHistory(historyRef.current).catch(() => undefined);
   };
 
+  // Downloads the Shortcuts action finished while the app was away join the list.
+  const withBackgroundDownloads = async (current: DownloadHistoryItem[]) => {
+    const fresh = await takeBackgroundDownloads();
+    if (!fresh.length) return null;
+    const known = new Set(current.map((entry) => entry.id));
+    const next = [...fresh.filter((entry) => !known.has(entry.id)), ...current].sort((a, b) => b.createdAt - a.createdAt);
+    for (const dropped of next.slice(20)) await deleteLocalFile(dropped.uri);
+    return next.slice(0, 20);
+  };
+
   useEffect(() => {
-    void loadDownloadHistory().then(async (saved) => {
+    void loadDownloadHistory().then(async (stored) => {
+      let saved = stored;
+      const merged = await withBackgroundDownloads(saved);
+      if (merged) saved = merged;
       setHistory(saved);
       // Entries saved before sizes were kept get them measured once.
       const missing = saved.filter((entry) => entry.sizeBytes == null);
-      if (!missing.length) return;
-      const measured = await Promise.all(saved.map(async (entry) => (entry.sizeBytes == null ? { ...entry, sizeBytes: await fileSize(entry.uri) ?? 0 } : entry)));
-      setHistory((current) => current.map((entry) => measured.find((candidate) => candidate.id === entry.id) ?? entry));
-      await saveDownloadHistory(measured).catch(() => undefined);
+      if (missing.length) {
+        saved = await Promise.all(saved.map(async (entry) => (entry.sizeBytes == null ? { ...entry, sizeBytes: await fileSize(entry.uri) ?? 0 } : entry)));
+        setHistory((current) => current.map((entry) => saved.find((candidate) => candidate.id === entry.id) ?? entry));
+      }
+      if (merged || missing.length) await saveDownloadHistory(saved).catch(() => undefined);
+    });
+    const subscription = AppState.addEventListener('change', (status) => {
+      if (status !== 'active') return;
+      void withBackgroundDownloads(historyRef.current).then(async (merged) => {
+        if (!merged) return;
+        setHistory(merged);
+        await saveDownloadHistory(merged).catch(() => undefined);
+      });
     });
     return () => {
+      subscription.remove();
       analyzeController.current?.abort();
       task.current?.cancel();
       if (doneTimer.current) clearTimeout(doneTimer.current);
@@ -891,6 +914,10 @@ export function DownloaderNative({ tokens, dataSaver, onDataSaverChange, onBack,
       task.current = null;
     }
   };
+
+  useEffect(() => {
+    if (openDownloads) setShowDownloads(true);
+  }, [openDownloads]);
 
   useEffect(() => {
     if (!sharedLink) return;

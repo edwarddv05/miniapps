@@ -1,0 +1,256 @@
+<meta charset="utf-8">
+<title>Descarga a Recientes</title>
+<style>
+  /* One phone in the middle; under it the replay controls. */
+  :root {
+    --bg: #eef0f4;
+    --fg: #1b1e26;
+    --muted: #5d6475;
+    --rule: #d5d9e2;
+    --accent: #6f63e8;
+    --control: #ffffff;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    --round: ui-rounded, "SF Pro Rounded", -apple-system, "Segoe UI", sans-serif;
+    /* The phone is the app's dark theme, as in the screenshots. */
+    --ph-bg: #111319;
+    --ph-fg: #f4f5f8;
+    --ph-muted: #8b90a0;
+    --ph-rule: #262a33;
+    --ph-field: #23262f;
+    --ph-accent: #8c80ff;
+    --ph-accent-ink: #14121f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #0b0c10; --fg: #e9ebf0; --muted: #959bab; --rule: #262a33; --accent: #9a90ff; --control: #1a1d24; color-scheme: dark; }
+  }
+  :root[data-theme="dark"] { --bg: #0b0c10; --fg: #e9ebf0; --muted: #959bab; --rule: #262a33; --accent: #9a90ff; --control: #1a1d24; color-scheme: dark; }
+
+  body { background: var(--bg); color: var(--fg); font-family: var(--font); padding: 24px 16px 40px; }
+  .page { max-width: 760px; margin: 0 auto; display: grid; gap: 18px; justify-items: center; }
+  header { justify-self: stretch; }
+  header h1 { font: 700 26px/1.15 var(--round); margin: 0; }
+  header p { margin: 6px 0 0; color: var(--muted); font-size: 15px; max-width: 60ch; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; justify-content: center; }
+  .controls button { font: 600 15px var(--font); padding: 8px 14px; border-radius: 999px; border: 1px solid var(--rule); background: var(--control); color: var(--fg); cursor: pointer; }
+  .controls button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .controls label { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 14px; }
+
+  .phone { position: relative; width: 100%; max-width: 360px; aspect-ratio: 360 / 740; border-radius: 44px; overflow: hidden; background: var(--ph-bg); color: var(--ph-fg); box-shadow: 0 0 0 9px #050608, 0 18px 40px rgba(0,0,0,.28); isolation: isolate; }
+  .glow { position: absolute; width: 420px; height: 380px; left: -110px; top: -200px; border-radius: 50%; background: #c0443a; filter: blur(90px); opacity: .45; z-index: 0; }
+  .ui { position: absolute; inset: 0; z-index: 1; padding: 0 18px; display: flex; flex-direction: column; gap: 16px; }
+  .status { height: 44px; display: flex; align-items: center; justify-content: space-between; font: 600 15px var(--font); padding: 6px 10px 0; }
+  .status i { font-style: normal; font-size: 12px; }
+  .nav { display: grid; grid-template-columns: 42px 1fr 42px; align-items: center; }
+  .nav h2 { margin: 0; text-align: center; font: 600 17px var(--font); }
+  .round { width: 42px; height: 42px; border-radius: 50%; background: rgba(255,255,255,.1); box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); display: grid; place-items: center; }
+  .field { height: 50px; border-radius: 999px; background: var(--ph-field); box-shadow: inset 0 0 0 1px rgba(255,255,255,.07); display: flex; align-items: center; gap: 10px; padding: 0 14px 0 9px; font-size: 15px; }
+  .field .src { width: 32px; height: 32px; border-radius: 9px; background: #ff0033; display: grid; place-items: center; flex: none; }
+  .field .src::after { content: ""; border-left: 9px solid #fff; border-top: 6px solid transparent; border-bottom: 6px solid transparent; margin-left: 2px; }
+  .field span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .field b { color: var(--ph-muted); font-weight: 400; font-size: 18px; }
+
+  .preview { display: grid; gap: 10px; }
+  .thumb { position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: 14px; overflow: hidden; }
+  /* A stand-in picture: a dusk landscape drawn in CSS. */
+  .art { position: absolute; inset: 0; background:
+      radial-gradient(circle at 70% 38%, #ffd27a 0 7%, transparent 7.5%),
+      linear-gradient(180deg, transparent 58%, #2c1d3b 58% 64%, #1a1328 64%),
+      linear-gradient(180deg, #ff8a5c, #c94b6d 45%, #5b2c6f 70%); }
+  .art::after { content: ""; position: absolute; left: -5%; right: -5%; bottom: 22%; height: 26%; background: #3a2146; clip-path: polygon(0 100%, 12% 40%, 22% 70%, 35% 20%, 48% 65%, 60% 30%, 74% 75%, 86% 35%, 100% 80%, 100% 100%); }
+  .thumb time { position: absolute; right: 8px; bottom: 8px; background: rgba(0,0,0,.6); color: #fff; font-size: 11.5px; padding: 2px 6px; border-radius: 6px; font-variant-numeric: tabular-nums; }
+  .preview h3 { margin: 0; font: 600 16.5px/1.25 var(--font); }
+  .preview p { margin: 0; color: var(--ph-muted); font-size: 13.5px; }
+  .seg { display: grid; grid-template-columns: 1fr 1fr; background: var(--ph-field); border-radius: 9px; padding: 2px; font-size: 13.5px; text-align: center; }
+  .seg span { padding: 6px; border-radius: 7px; }
+  .seg .on { background: #4a4e5a; font-weight: 600; }
+
+  .recents h4 { margin: 4px 0 6px; font: 700 19px var(--font); }
+  .list { display: grid; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--ph-rule); overflow: hidden; }
+  .row:first-child { border-top: 0; }
+  .row .mini { width: 48px; height: 48px; border-radius: 10px; flex: none; position: relative; overflow: hidden; }
+  .row .txt { flex: 1; min-width: 0; display: grid; gap: 2px; }
+  .row .txt b { font-weight: 400; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .txt small { color: var(--ph-muted); font-size: 12.5px; }
+  .row .share { color: var(--ph-muted); font-size: 15px; }
+  .row.new { height: 0; padding-block: 0; opacity: 1; }
+  .row.new .txt, .row.new .share { opacity: 0; }
+  .row.new .mini { visibility: hidden; }
+
+  .bar { position: absolute; left: 18px; right: 18px; bottom: 22px; height: 54px; border-radius: 999px; z-index: 3; overflow: hidden; background: var(--ph-accent); color: var(--ph-accent-ink); display: flex; align-items: center; justify-content: center; gap: 8px; font: 600 16.5px var(--font); cursor: pointer; border: 0; }
+  .bar:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+  .bar.loading { background: #2b2e38; color: var(--ph-fg); justify-content: flex-start; padding-left: 20px; }
+  .bar canvas { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .45; }
+  .bar .label { position: relative; font-variant-numeric: tabular-nums; }
+  .bar .check { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--ph-accent-ink); color: var(--ph-accent); font-size: 12px; }
+
+  .flyer { position: absolute; z-index: 4; border-radius: 14px; overflow: hidden; pointer-events: none; box-shadow: 0 10px 30px rgba(0,0,0,.45); }
+  /* The picture keeps its 16:9 shape, as tall as the frame, centred: it covers any frame from 16:9 to square. */
+  .flyer .art { inset: 0 auto; left: 50%; height: 100%; aspect-ratio: 16 / 9; transform: translateX(-50%); }
+
+  @media (prefers-reduced-motion: reduce) { .flyer { display: none; } }
+</style>
+
+<div class="page">
+  <header>
+    <h1>Descarga a Recientes</h1>
+    <p>Al terminar la descarga, la miniatura sale de la vista previa, se encoge y aterriza en el primer lugar de Recientes, que le abre espacio justo antes de que llegue.</p>
+  </header>
+
+  <div class="phone" id="phone">
+    <div class="glow"></div>
+    <div class="ui" id="ui">
+      <div class="status"><span>3:59</span><i>●●● ᯤ 100%</i></div>
+      <div class="nav">
+        <div class="round"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><path d="M15 5l-7 7 7 7"/></svg></div>
+        <h2>Downloader</h2><span></span>
+      </div>
+      <div class="field"><div class="src"></div><span>youtube.com/watch?v=Kp3uG8sQx2A</span><b>✕</b></div>
+      <div class="preview">
+        <div class="thumb" id="thumb"><div class="art"></div><time>4:12</time></div>
+        <h3>Atardecer en Paracas · timelapse 4K</h3>
+        <p>Viajes del Sur · 4:12</p>
+        <div class="seg"><span class="on">Video</span><span>Audio</span></div>
+      </div>
+      <div class="recents">
+        <h4>Recientes</h4>
+        <div class="list" id="list"></div>
+      </div>
+    </div>
+    <button class="bar" id="bar" type="button"><span class="label">↓ Descargar</span></button>
+  </div>
+
+  <div class="controls">
+    <button id="again" type="button">Repetir</button>
+    <label><input type="checkbox" id="slow"> Cámara lenta</label>
+  </div>
+</div>
+
+<script>
+(() => {
+  const OLD = [
+    { title: 'Receta de lomo saltado en 10 minutos', meta: 'Video · TikTok · 12 oct', art: 'linear-gradient(135deg,#7a4b2a,#d99a4e)' },
+    { title: 'Lo-fi para estudiar — 1 hora', meta: 'Audio · YouTube · 9 oct', art: 'linear-gradient(135deg,#2b3a67,#7b6fd6)' },
+  ];
+  const list = document.getElementById('list');
+  const thumb = document.getElementById('thumb');
+  const bar = document.getElementById('bar');
+  const phone = document.getElementById('phone');
+  const slow = document.getElementById('slow');
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const speed = () => (slow.checked ? 3 : 1);
+  let running = false;
+
+  function rowHtml(item, isNew) {
+    return `<div class="row${isNew ? ' new' : ''}"><div class="mini" style="background:${item.art}">${item.inner || ''}</div><div class="txt"><b>${item.title}</b><small>${item.meta}</small></div><span class="share">⇪</span></div>`;
+  }
+  function reset() {
+    list.innerHTML = OLD.map((item) => rowHtml(item, false)).join('');
+    bar.className = 'bar';
+    bar.innerHTML = '<span class="label">↓ Descargar</span>';
+    thumb.style.opacity = '';
+    running = false;
+  }
+
+  // The liquid fill from the app's download bar, simplified.
+  function liquid(canvas, level, time) {
+    const r = canvas.getBoundingClientRect(), dpr = devicePixelRatio || 1;
+    canvas.width = r.width * dpr; canvas.height = r.height * dpr;
+    const ctx = canvas.getContext('2d'); ctx.scale(dpr, dpr);
+    const edge = r.width * level, swell = 5 * Math.min(1, level * 8) * Math.min(1, (1 - level) * 8);
+    for (const [phase, alpha] of [[time * 3.1 + 1.3, 0.45], [time * 4.2, 1]]) {
+      ctx.beginPath(); ctx.moveTo(0, 0);
+      for (let i = 0; i <= 24; i++) { const y = r.height * i / 24; ctx.lineTo(Math.max(0, edge + swell * Math.sin(y / r.height * Math.PI * 2 + phase)), y); }
+      ctx.lineTo(0, r.height); ctx.closePath();
+      ctx.fillStyle = `rgba(140,128,255,${alpha})`; ctx.fill();
+    }
+  }
+
+  async function run() {
+    if (running) return;
+    running = true;
+    // 1. Download with the liquid bar.
+    bar.className = 'bar loading';
+    bar.innerHTML = '<canvas></canvas><span class="label">0 %</span>';
+    const canvas = bar.querySelector('canvas'), label = bar.querySelector('.label');
+    const total = 2600 * speed();
+    const start = performance.now();
+    await new Promise((done) => {
+      const tick = (now) => {
+        const t = Math.min(1, (now - start) / total);
+        const level = 1 - Math.pow(1 - t, 1.6);
+        liquid(canvas, level, now / 1000);
+        label.textContent = `${Math.round(level * 100)} %`;
+        t < 1 ? requestAnimationFrame(tick) : done();
+      };
+      requestAnimationFrame(tick);
+    });
+    // 2. Saved: the bar turns back to the accent with a check that bounces.
+    bar.className = 'bar';
+    bar.innerHTML = '<span class="check">✓</span><span class="label">Guardado</span>';
+    bar.querySelector('.check').animate([{ transform: 'scale(.3)' }, { transform: 'scale(1.25)' }, { transform: 'scale(1)' }], { duration: 420 * speed(), easing: 'cubic-bezier(.3,1.6,.5,1)' });
+    await wait(160 * speed());
+    await fly();
+    running = false;
+  }
+
+  const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+
+  async function fly() {
+    // The new row goes in first, collapsed, so its final place can be measured.
+    list.insertAdjacentHTML('afterbegin', rowHtml({ title: 'Atardecer en Paracas · timelapse 4K', meta: 'Video · YouTube · 14 oct', art: 'transparent', inner: '<div class="art"></div>' }, true));
+    const row = list.firstElementChild;
+    const mini = row.querySelector('.mini');
+    const phoneBox = phone.getBoundingClientRect();
+    const from = thumb.getBoundingClientRect();
+
+    // Measure where the thumbnail will land once the row is open.
+    row.style.height = 'auto'; row.style.paddingBlock = '8px';
+    const to = mini.getBoundingClientRect();
+    row.style.height = '0px'; row.style.paddingBlock = '0px';
+
+    const flyer = document.createElement('div');
+    flyer.className = 'flyer';
+    flyer.innerHTML = '<div class="art"></div>';
+    Object.assign(flyer.style, { left: `${from.left - phoneBox.left}px`, top: `${from.top - phoneBox.top}px`, width: `${from.width}px`, height: `${from.height}px` });
+    phone.append(flyer);
+    thumb.style.opacity = '.35';
+
+    const s = speed();
+    const duration = 720 * s;
+    // The frame itself moves and resizes while the picture stays cropped to
+    // cover it, so the 16:9 still becomes the square thumbnail without
+    // squashing. A lift first, then a curved fall into the slot.
+    const box = (r) => ({ left: `${r.left - phoneBox.left}px`, top: `${r.top - phoneBox.top}px`, width: `${r.width}px`, height: `${r.height}px` });
+    const mid = { left: from.left + (to.left - from.left) * 0.45 + 46, top: from.top + (to.top - from.top) * 0.5, width: from.width * 0.42, height: from.width * 0.3 };
+    const lift = { left: from.left + 10, top: from.top - 12, width: from.width * 0.94, height: from.height * 0.94 };
+    const flight = flyer.animate([
+      { ...box(from), borderRadius: '14px', offset: 0 },
+      { ...box(lift), borderRadius: '14px', offset: 0.16 },
+      { ...box(mid), borderRadius: '12px', offset: 0.55 },
+      { ...box(to), borderRadius: '10px', offset: 1 },
+    ], { duration, easing: 'cubic-bezier(.45,.05,.3,1)', fill: 'forwards' });
+
+    // The list opens its slot during the second half of the flight.
+    await wait(duration * 0.35);
+    row.animate([{ height: '0px', paddingBlock: '0px' }, { height: `${to.height + 16}px`, paddingBlock: '8px' }], { duration: duration * 0.55, easing: 'cubic-bezier(.3,.9,.3,1)', fill: 'forwards' });
+    await flight.finished;
+
+    // Landing: the real thumbnail takes over with a small squash, then the text.
+    flyer.remove();
+    row.classList.remove('new');
+    row.getAnimations().forEach((a) => { a.commitStyles(); a.cancel(); });
+    row.style.height = ''; row.style.paddingBlock = '';
+    mini.animate([{ transform: 'scale(1.12, .88)' }, { transform: 'scale(.96, 1.04)' }, { transform: 'scale(1)' }], { duration: 360 * s, easing: 'ease-out' });
+    row.querySelector('.txt').animate([{ opacity: 0, transform: 'translateX(-8px)' }, { opacity: 1, transform: 'none' }], { duration: 300 * s, easing: 'ease-out', delay: 60 * s, fill: 'backwards' });
+    row.querySelector('.share').animate([{ opacity: 0 }, { opacity: 1 }], { duration: 300 * s, delay: 120 * s, fill: 'backwards' });
+    thumb.style.opacity = '';
+    thumb.animate([{ opacity: .35 }, { opacity: 1 }], { duration: 400 * s });
+  }
+
+  bar.addEventListener('click', () => { if (bar.querySelector('.label').textContent.includes('Descargar')) run(); });
+  document.getElementById('again').addEventListener('click', () => { reset(); setTimeout(run, 250); });
+  reset();
+  if (!reduced) setTimeout(run, 700);
+})();
+</script>

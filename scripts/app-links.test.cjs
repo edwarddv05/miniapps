@@ -13,6 +13,10 @@ test('the widget opens Horario', () => {
   assert.deepEqual(parseAppLink('miniapps://schedule'), { kind: 'schedule' });
 });
 
+test('the download Live Activity opens Descargas', () => {
+  assert.deepEqual(parseAppLink('miniapps://downloads'), { kind: 'downloads' });
+});
+
 test('other schemes, routes and addresses are ignored', () => {
   assert.equal(parseAppLink('miniapps://download?url=javascript%3Aalert(1)'), null);
   assert.equal(parseAppLink('miniapps://download'), null);

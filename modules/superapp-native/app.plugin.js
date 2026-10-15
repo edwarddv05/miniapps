@@ -1,9 +1,33 @@
-// Adds the build phase that installs the embedded Python into the app bundle.
-const { withXcodeProject } = require('expo/config-plugins');
+// Adds the build phase that installs the embedded Python into the app bundle,
+// and the Shortcuts action, which has to be compiled in the app target itself.
+const fs = require('fs');
+const path = require('path');
+const { IOSConfig, withDangerousMod, withXcodeProject } = require('expo/config-plugins');
+
+const APP_TARGET_FILES = ['DownloadLinkIntent.swift'];
 
 const PHASE_NAME = 'Install Python';
 
+function withAppTargetFiles(config) {
+  config = withDangerousMod(config, ['ios', (cfg) => {
+    const folder = path.join(cfg.modRequest.platformProjectRoot, cfg.modRequest.projectName);
+    for (const file of APP_TARGET_FILES) fs.copyFileSync(path.join(__dirname, 'app-target', file), path.join(folder, file));
+    return cfg;
+  }]);
+  return withXcodeProject(config, (cfg) => {
+    const project = cfg.modResults;
+    const app = project.getTarget('com.apple.product-type.application');
+    const group = cfg.modRequest.projectName;
+    for (const file of APP_TARGET_FILES) {
+      const filepath = `${group}/${file}`;
+      if (!project.hasFile(filepath)) IOSConfig.XcodeUtils.addBuildSourceFileToGroup({ filepath, groupName: group, project, targetUuid: app.uuid });
+    }
+    return cfg;
+  });
+}
+
 module.exports = function withSuperappNative(config) {
+  config = withAppTargetFiles(config);
   return withXcodeProject(config, (cfg) => {
     const project = cfg.modResults;
     const app = project.getTarget('com.apple.product-type.application');

@@ -1,0 +1,208 @@
+<meta charset="utf-8">
+<title>Filtro de Descargas</title>
+<style>
+  /* Three Descargas pages; only the way to filter by type changes. */
+  :root {
+    --bg: #eef0f4;
+    --fg: #1b1e26;
+    --muted: #5d6475;
+    --accent: #6f63e8;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    --round: ui-rounded, "SF Pro Rounded", -apple-system, "Segoe UI", sans-serif;
+    --ph-bg: #111319;
+    --ph-fg: #f4f5f8;
+    --ph-muted: #8b90a0;
+    --ph-accent: #8c80ff;
+    --ph-accent-ink: #14121f;
+    --c-video: #8c80ff;
+    --c-audio: #5ec4b6;
+    --c-image: #f2b34f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #0b0c10; --fg: #e9ebf0; --muted: #959bab; --accent: #9a90ff; color-scheme: dark; }
+  }
+  :root[data-theme="dark"] { --bg: #0b0c10; --fg: #e9ebf0; --muted: #959bab; --accent: #9a90ff; color-scheme: dark; }
+
+  body { background: var(--bg); color: var(--fg); font-family: var(--font); padding: 24px 16px 40px; }
+  .page { max-width: 1180px; margin: 0 auto; display: grid; gap: 22px; }
+  header h1 { font: 700 26px/1.15 var(--round); margin: 0; }
+  header p { margin: 6px 0 0; color: var(--muted); font-size: 15px; max-width: 62ch; }
+  .phones { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 28px; justify-items: center; }
+  figure { margin: 0; display: grid; gap: 10px; justify-items: center; width: 100%; max-width: 360px; }
+  figcaption { text-align: center; }
+  figcaption b { display: block; font: 700 17px var(--round); }
+  figcaption span { color: var(--muted); font-size: 13.5px; }
+
+  .phone { position: relative; width: 100%; max-width: 360px; aspect-ratio: 360 / 700; border-radius: 44px; overflow: hidden; background: var(--ph-bg); color: var(--ph-fg); box-shadow: 0 0 0 9px #050608, 0 18px 40px rgba(0,0,0,.28); isolation: isolate; user-select: none; }
+  .glow { position: absolute; width: 420px; height: 380px; left: -110px; top: -200px; border-radius: 50%; filter: blur(90px); opacity: .4; background: #5b4fd0; }
+  .ui { position: absolute; inset: 0; z-index: 1; padding: 0 18px; display: flex; flex-direction: column; gap: 14px; overflow: hidden; }
+  .status { height: 44px; flex: none; display: flex; align-items: center; justify-content: space-between; font: 600 15px var(--font); padding: 6px 10px 0; }
+  .status i { font-style: normal; font-size: 12px; }
+  .nav { display: grid; grid-template-columns: 42px 1fr 42px; align-items: center; flex: none; position: relative; z-index: 3; }
+  .nav h2 { margin: 0; text-align: center; font: 600 17px var(--font); }
+  .round { all: unset; width: 42px; height: 42px; border-radius: 50%; background: rgba(255,255,255,.1); box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); display: grid; place-items: center; cursor: pointer; }
+  .round svg { width: 19px; height: 19px; }
+  .round:focus-visible, button:focus-visible { outline: 2px solid var(--ph-accent); outline-offset: 2px; }
+
+  /* A: chips with icon and count, like Anime and Tarjetas. */
+  .chips { display: flex; gap: 6px; flex: none; overflow-x: auto; scrollbar-width: none; margin: 0 -18px; padding: 0 18px; }
+  .chip { all: unset; cursor: pointer; flex: none; display: flex; gap: 5px; align-items: center; padding: 7px 11px; border-radius: 999px; background: rgba(255,255,255,.07); font: 600 14px var(--font); transition: background .2s, color .2s; }
+  .chip em { font-style: normal; font-weight: 500; color: var(--ph-muted); font-variant-numeric: tabular-nums; }
+  .chip svg { width: 15px; height: 15px; }
+  .chip[aria-pressed="true"] { background: var(--ph-accent); color: var(--ph-accent-ink); }
+  .chip[aria-pressed="true"] em { color: rgba(20,18,31,.65); }
+
+  /* B: the storage bar is the filter; each colour is a type. */
+  .storage { display: grid; gap: 10px; flex: none; }
+  .storage .total { display: flex; justify-content: space-between; align-items: baseline; }
+  .storage .total b { font: 800 26px var(--round); font-variant-numeric: tabular-nums; }
+  .storage .total span { color: var(--ph-muted); font-size: 13px; }
+  .meter { display: flex; gap: 3px; height: 10px; }
+  .meter button { all: unset; cursor: pointer; height: 100%; border-radius: 5px; transition: opacity .25s, transform .3s cubic-bezier(.3,1.6,.5,1); }
+  .meter.picked button:not(.on) { opacity: .25; }
+  .meter button.on { transform: scaleY(1.5); }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; }
+  .legend button { all: unset; cursor: pointer; display: flex; gap: 6px; align-items: center; font-size: 13px; transition: opacity .2s; }
+  .legend button i { width: 9px; height: 9px; border-radius: 50%; }
+  .legend button small { color: var(--ph-muted); font-variant-numeric: tabular-nums; }
+  .legend.picked button:not(.on) { opacity: .4; }
+
+  /* C: the title is the filter, like Photos; a menu drops from it. */
+  .nav h2 button { all: unset; cursor: pointer; font: 600 17px var(--font); display: inline-flex; gap: 5px; align-items: center; }
+  .nav h2 button::after { content: ""; width: 7px; height: 7px; border-right: 2px solid var(--ph-muted); border-bottom: 2px solid var(--ph-muted); transform: rotate(45deg) translateY(-3px); }
+  .drop { position: absolute; left: 50%; top: 110px; width: 220px; transform: translateX(-50%) scale(.92); transform-origin: 50% 0; opacity: 0; pointer-events: none; z-index: 4; background: rgba(44,47,58,.97); border-radius: 18px; padding: 6px; box-shadow: 0 18px 40px rgba(0,0,0,.5), inset 0 0 0 1px rgba(255,255,255,.08); transition: opacity .18s, transform .28s cubic-bezier(.3,1.4,.5,1); }
+  .drop.open { opacity: 1; transform: translateX(-50%) scale(1); pointer-events: auto; }
+  .drop button { all: unset; cursor: pointer; display: flex; gap: 10px; align-items: center; width: calc(100% - 24px); padding: 10px 12px; border-radius: 12px; font-size: 15px; }
+  .drop button svg { width: 17px; height: 17px; }
+  .drop button small { margin-left: auto; color: var(--ph-muted); font-variant-numeric: tabular-nums; }
+  .drop button[aria-checked="true"] { background: rgba(255,255,255,.08); }
+  .subline { text-align: center; color: var(--ph-muted); font-size: 13px; margin-top: -8px; font-variant-numeric: tabular-nums; }
+
+  .scroll { display: grid; gap: 10px; align-content: start; }
+  .day { font: 600 13px var(--font); color: var(--ph-muted); margin-top: 2px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .tile { display: grid; gap: 4px; transition: opacity .25s; }
+  .tile .pic { aspect-ratio: 1; border-radius: 14px; position: relative; overflow: hidden; }
+  .tile .tag { position: absolute; left: 7px; bottom: 7px; background: rgba(0,0,0,.55); color: #fff; font-size: 11px; padding: 2px 6px; border-radius: 6px; z-index: 2; }
+  .tile b { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tile small { color: var(--ph-muted); font-size: 11.5px; margin-top: -2px; }
+  .tile[hidden], .day[hidden], .grid[hidden] { display: none; }
+
+  /* Pictures drawn in CSS stand in for thumbnails. */
+  .art { background: linear-gradient(180deg, #ff8a5c, #c94b6d 45%, #5b2c6f 70%); }
+  .art::before { content: ""; position: absolute; width: 22%; aspect-ratio: 1; border-radius: 50%; background: #ffd27a; left: 60%; top: 20%; }
+  .art.food { background: radial-gradient(circle at 50% 55%, #f4c26b 0 22%, #b0532c 23% 34%, #6b3a22 35%); }
+  .art.food::before { display: none; }
+  .art.music { background: linear-gradient(135deg, #2b3a67, #7b6fd6); }
+  .art.music::before { background: none; border: 3px solid rgba(255,255,255,.7); left: 37%; top: 33%; }
+  .art.sea { background: linear-gradient(180deg, #7cc6e8, #2f7fb3 55%, #1c4f7a); }
+  .art.sea::before { background: #fff6cf; width: 14%; left: 20%; }
+  .art.city { background: linear-gradient(180deg, #23243a, #3e3263); }
+  .art.city::before { background: #f7e8a6; width: 12%; left: 70%; top: 14%; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="page">
+  <header>
+    <h1>Filtro de Descargas</h1>
+    <p>Tres reemplazos para el control Todo / Videos / Audio de la página Descargas. Tócalos dentro de cada teléfono; un segundo toque en el mismo tipo vuelve a Todo.</p>
+  </header>
+  <div class="phones">
+    <figure><div class="phone" data-variant="chips"></div><figcaption><b>A · Fichas con cantidad</b><span>Iguales a los filtros de Anime y Tarjetas, con ícono y cuántos hay de cada tipo.</span></figcaption></figure>
+    <figure><div class="phone" data-variant="storage"></div><figcaption><b>B · La barra de espacio</b><span>Cuánto ocupa cada tipo, en su color. Tocar un color o su nombre filtra; la barra y el filtro son lo mismo.</span></figcaption></figure>
+    <figure><div class="phone" data-variant="title"></div><figcaption><b>C · En el título</b><span>Tocar el título Descargas abre un menú con cada tipo y su peso, como el selector de Fotos. Arriba no queda nada más.</span></figcaption></figure>
+  </div>
+</div>
+
+<script>
+(() => {
+  const ICON = {
+    all: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></svg>',
+    video: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5v5l4.5-2.5z" fill="currentColor"/></svg>',
+    audio: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l11-2v13"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/></svg>',
+    image: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></svg>',
+    back: '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><path d="M15 5l-7 7 7 7"/></svg>',
+  };
+  const TYPES = [
+    { key: 'video', label: 'Videos', mb: 208, color: 'var(--c-video)' },
+    { key: 'audio', label: 'Audio', mb: 103, color: 'var(--c-audio)' },
+    { key: 'image', label: 'Fotos', mb: 2.1, color: 'var(--c-image)' },
+  ];
+  const SAVED = [
+    { title: 'Atardecer en Paracas', art: '', kind: 'video', tag: '▶ 4:12', size: '120 MB', day: 'Hoy' },
+    { title: 'Lomo saltado en 10 min', art: 'food', kind: 'video', tag: '▶ 0:58', size: '24 MB', day: 'Hoy' },
+    { title: 'Lo-fi para estudiar', art: 'music', kind: 'audio', tag: '♪ 1:02:10', size: '58 MB', day: 'Esta semana' },
+    { title: 'Playa Máncora al amanecer', art: 'sea', kind: 'video', tag: '▶ 2:31', size: '64 MB', day: 'Esta semana' },
+    { title: 'Lima de noche', art: 'city', kind: 'image', tag: 'Foto', size: '2,1 MB', day: 'Esta semana' },
+    { title: 'Podcast · Historia del Perú', art: 'music', kind: 'audio', tag: '♪ 48:20', size: '45 MB', day: 'Octubre' },
+  ];
+  const count = (k) => SAVED.filter((s) => s.kind === k).length;
+  const mbLabel = (mb) => (mb < 10 ? `${String(mb).replace('.', ',')} MB` : `${Math.round(mb)} MB`);
+  const total = TYPES.reduce((a, t) => a + t.mb, 0);
+  const days = [...new Set(SAVED.map((s) => s.day))];
+  const gridHtml = `<div class="scroll">${days.map((d) => `<div class="day">${d}</div><div class="grid">${SAVED.filter((s) => s.day === d).map((s) => `<div class="tile" data-kind="${s.kind}"><div class="pic art ${s.art}"><span class="tag">${s.tag}</span></div><b>${s.title}</b><small>${s.size}</small></div>`).join('')}</div>`).join('')}</div>`;
+  const status = '<div class="status"><span>3:59</span><i>●●● ᯤ 100%</i></div>';
+
+  function applyFilter(phone, key) {
+    phone.querySelectorAll('.tile').forEach((t) => { t.hidden = key !== 'all' && t.dataset.kind !== key; });
+    phone.querySelectorAll('.day').forEach((day) => { const grid = day.nextElementSibling; const any = [...grid.children].some((t) => !t.hidden); day.hidden = !any; grid.hidden = !any; });
+    phone.querySelectorAll('.tile:not([hidden])').forEach((t, i) => t.animate([{ opacity: 0, transform: 'scale(.94)' }, { opacity: 1, transform: 'none' }], { duration: 260, delay: i * 30, easing: 'ease-out', fill: 'backwards' }));
+  }
+
+  document.querySelectorAll('.phone').forEach((phone) => {
+    const variant = phone.dataset.variant;
+    let current = 'all';
+    const toggle = (key) => { current = current === key ? 'all' : key; return current; };
+
+    if (variant === 'chips') {
+      phone.innerHTML = `<div class="glow"></div><div class="ui">${status}<div class="nav"><button class="round" type="button" aria-label="Atrás">${ICON.back}</button><h2>Descargas</h2><span></span></div>
+        <div class="chips">${[{ key: 'all', label: 'Todo', n: SAVED.length }, ...TYPES.map((t) => ({ key: t.key, label: t.label, n: count(t.key) }))].map((c) => `<button class="chip" type="button" data-k="${c.key}" aria-pressed="${c.key === 'all'}">${ICON[c.key]}${c.label} <em>${c.n}</em></button>`).join('')}</div>${gridHtml}</div>`;
+      phone.querySelector('.chips').addEventListener('click', (e) => {
+        const b = e.target.closest('.chip'); if (!b) return;
+        const key = b.dataset.k === 'all' ? 'all' : toggle(b.dataset.k);
+        current = key;
+        phone.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-pressed', String(c.dataset.k === key)));
+        applyFilter(phone, key);
+      });
+    }
+
+    if (variant === 'storage') {
+      phone.innerHTML = `<div class="glow"></div><div class="ui">${status}<div class="nav"><button class="round" type="button" aria-label="Atrás">${ICON.back}</button><h2>Descargas</h2><span></span></div>
+        <div class="storage"><div class="total"><b class="sum">${mbLabel(total)}</b><span class="what">6 archivos en el iPhone</span></div>
+        <div class="meter">${TYPES.map((t) => `<button type="button" data-k="${t.key}" aria-label="${t.label}" style="flex:${Math.max(t.mb, 6)};background:${t.color}"></button>`).join('')}</div>
+        <div class="legend">${TYPES.map((t) => `<button type="button" data-k="${t.key}"><i style="background:${t.color}"></i>${t.label} <small>${mbLabel(t.mb)}</small></button>`).join('')}</div></div>${gridHtml}</div>`;
+      const pick = (key) => {
+        const k = toggle(key);
+        phone.querySelectorAll('.meter, .legend').forEach((g) => g.classList.toggle('picked', k !== 'all'));
+        phone.querySelectorAll('.meter button, .legend button').forEach((b) => b.classList.toggle('on', b.dataset.k === k));
+        const type = TYPES.find((t) => t.key === k);
+        phone.querySelector('.sum').textContent = mbLabel(type ? type.mb : total);
+        phone.querySelector('.what').textContent = type ? `${count(k)} ${k === 'audio' ? (count(k) === 1 ? 'audio' : 'audios') : type.label.toLowerCase()}` : '6 archivos en el iPhone';
+        applyFilter(phone, k);
+      };
+      phone.querySelector('.storage').addEventListener('click', (e) => { const b = e.target.closest('[data-k]'); if (b) pick(b.dataset.k); });
+    }
+
+    if (variant === 'title') {
+      const names = { all: 'Descargas', video: 'Videos', audio: 'Audio', image: 'Fotos' };
+      phone.innerHTML = `<div class="glow"></div><div class="ui">${status}<div class="nav"><button class="round" type="button" aria-label="Atrás">${ICON.back}</button><h2><button type="button" class="ttl" aria-haspopup="menu">Descargas</button></h2><span></span></div>
+        <div class="subline">6 archivos · ${mbLabel(total)}</div>${gridHtml}</div>
+        <div class="drop" role="menu">${[{ key: 'all', label: 'Todo', mb: total }, ...TYPES].map((t) => `<button role="menuitemradio" data-k="${t.key}" aria-checked="${t.key === 'all'}">${ICON[t.key]}${t.label}<small>${mbLabel(t.mb)}</small></button>`).join('')}</div>`;
+      const drop = phone.querySelector('.drop');
+      phone.addEventListener('click', (e) => {
+        if (e.target.closest('.ttl')) { drop.classList.toggle('open'); return; }
+        const b = e.target.closest('.drop [data-k]');
+        if (b) {
+          current = b.dataset.k;
+          drop.querySelectorAll('button').forEach((x) => x.setAttribute('aria-checked', String(x === b)));
+          phone.querySelector('.ttl').textContent = names[current];
+          const type = TYPES.find((t) => t.key === current);
+          phone.querySelector('.subline').textContent = type ? `${count(current)} · ${mbLabel(type.mb)}` : `6 archivos · ${mbLabel(total)}`;
+          applyFilter(phone, current);
+        }
+        drop.classList.remove('open');
+      });
+    }
+  });
+})();
+</script>

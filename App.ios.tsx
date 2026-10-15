@@ -460,12 +460,16 @@ export default function App() {
 
   // Links from the share extension (download that address) and the widget (open Horario).
   const [sharedLink, setSharedLink] = useState<SharedLink | null>(null);
+  const [downloadsLink, setDownloadsLink] = useState(0);
   useEffect(() => {
     const open = (link: string | null) => {
       const target = link ? parseAppLink(link) : null;
       if (!target) return;
       if (target.kind === 'schedule') {
         openSchedule();
+      } else if (target.kind === 'downloads') {
+        setDownloadsLink(Date.now());
+        openDownloader();
       } else {
         setSharedLink({ url: target.url, nonce: Date.now() });
         openDownloader();
@@ -610,7 +614,7 @@ export default function App() {
       onClear={clearSchedule}
     />
   );
-  const downloader = <DownloaderNative tokens={tokens} dataSaver={dataSaver} onDataSaverChange={changeDataSaver} onBack={() => setDestination('library')} sharedLink={sharedLink} onSharedLinkHandled={() => setSharedLink(null)} />;
+  const downloader = <DownloaderNative tokens={tokens} dataSaver={dataSaver} onDataSaverChange={changeDataSaver} onBack={() => setDestination('library')} sharedLink={sharedLink} onSharedLinkHandled={() => setSharedLink(null)} openDownloads={downloadsLink} />;
   const anime = <AnimeNative tokens={tokens} apiKey={apiKey} link={animeLink} onBack={() => setDestination('library')} />;
   const transit = <TransitNative tokens={tokens} link={transitLink} onBack={() => setDestination('library')} />;
   const cards = <CardsNative tokens={tokens} link={cardsLink} onBack={() => setDestination('library')} />;

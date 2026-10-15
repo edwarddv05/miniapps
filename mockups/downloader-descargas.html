@@ -1,0 +1,286 @@
+<meta charset="utf-8">
+<title>Downloader y Descargas</title>
+<style>
+  /* Three phones in the order they are used: start, a link ready to save, the saved files. */
+  :root {
+    --bg: #eef0f4;
+    --fg: #1b1e26;
+    --muted: #5d6475;
+    --rule: #d5d9e2;
+    --accent: #6f63e8;
+    --control: #ffffff;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    --round: ui-rounded, "SF Pro Rounded", -apple-system, "Segoe UI", sans-serif;
+    --ph-bg: #111319;
+    --ph-fg: #f4f5f8;
+    --ph-muted: #8b90a0;
+    --ph-rule: #262a33;
+    --ph-field: #23262f;
+    --ph-accent: #8c80ff;
+    --ph-accent-ink: #14121f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #0b0c10; --fg: #e9ebf0; --muted: #959bab; --rule: #262a33; --accent: #9a90ff; --control: #1a1d24; color-scheme: dark; }
+  }
+  :root[data-theme="dark"] { --bg: #0b0c10; --fg: #e9ebf0; --muted: #959bab; --rule: #262a33; --accent: #9a90ff; --control: #1a1d24; color-scheme: dark; }
+
+  body { background: var(--bg); color: var(--fg); font-family: var(--font); padding: 24px 16px 40px; }
+  .page { max-width: 1180px; margin: 0 auto; display: grid; gap: 22px; }
+  header h1 { font: 700 26px/1.15 var(--round); margin: 0; }
+  header p { margin: 6px 0 0; color: var(--muted); font-size: 15px; max-width: 64ch; }
+  .phones { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 28px; justify-items: center; }
+  figure { margin: 0; display: grid; gap: 10px; justify-items: center; width: 100%; max-width: 360px; }
+  figcaption { text-align: center; }
+  figcaption b { display: block; font: 700 17px var(--round); }
+  figcaption span { color: var(--muted); font-size: 13.5px; }
+  .replay { font: 600 14px var(--font); padding: 7px 13px; border-radius: 999px; border: 1px solid var(--rule); background: var(--control); color: var(--fg); cursor: pointer; }
+  .replay:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .phone { position: relative; width: 100%; max-width: 360px; aspect-ratio: 360 / 740; border-radius: 44px; overflow: hidden; background: var(--ph-bg); color: var(--ph-fg); box-shadow: 0 0 0 9px #050608, 0 18px 40px rgba(0,0,0,.28); isolation: isolate; user-select: none; }
+  .glow { position: absolute; width: 420px; height: 380px; left: -110px; top: -200px; border-radius: 50%; filter: blur(90px); opacity: .4; background: #5b4fd0; }
+  .glow.red { background: #c0443a; }
+  .ui { position: absolute; inset: 0; z-index: 1; padding: 0 18px; display: flex; flex-direction: column; gap: 14px; overflow: hidden; }
+  .status { height: 44px; flex: none; display: flex; align-items: center; justify-content: space-between; font: 600 15px var(--font); padding: 6px 10px 0; }
+  .status i { font-style: normal; font-size: 12px; }
+  .nav { display: grid; grid-template-columns: 42px 1fr 42px; align-items: center; flex: none; }
+  .nav h2 { margin: 0; text-align: center; font: 600 17px var(--font); }
+  .round { all: unset; position: relative; width: 42px; height: 42px; border-radius: 50%; background: rgba(255,255,255,.1); box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); display: grid; place-items: center; cursor: pointer; }
+  .round:focus-visible { outline: 2px solid var(--ph-accent); }
+  .round svg { width: 19px; height: 19px; }
+  .badge { position: absolute; top: -3px; right: -3px; min-width: 18px; height: 18px; border-radius: 9px; background: var(--ph-accent); color: var(--ph-accent-ink); font: 700 11px/18px var(--font); text-align: center; padding: 0 4px; box-sizing: border-box; }
+  .field { height: 50px; flex: none; border-radius: 999px; background: var(--ph-field); box-shadow: inset 0 0 0 1px rgba(255,255,255,.07); display: flex; align-items: center; gap: 10px; padding: 0 14px 0 9px; font-size: 15px; }
+  .field .src { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; flex: none; }
+  .field .src.yt { background: #ff0033; }
+  .field .src.yt::after { content: ""; border-left: 9px solid #fff; border-top: 6px solid transparent; border-bottom: 6px solid transparent; margin-left: 2px; }
+  .field .src.link { color: var(--ph-muted); }
+  .field span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .field span.ph { color: #6c7180; }
+  .field b { color: var(--ph-muted); font-weight: 400; }
+  h4 { margin: 0; font: 700 19px var(--font); display: flex; justify-content: space-between; align-items: baseline; }
+  h4 small { font: 400 14px var(--font); color: var(--ph-accent); }
+
+  /* Pictures drawn in CSS stand in for real thumbnails. */
+  .art { background: linear-gradient(180deg, #ff8a5c, #c94b6d 45%, #5b2c6f 70%); position: relative; overflow: hidden; }
+  .art::before { content: ""; position: absolute; width: 18%; aspect-ratio: 1; border-radius: 50%; background: #ffd27a; left: 62%; top: 22%; }
+  .art::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 40%; background: #2a1b38; clip-path: polygon(0 40%, 14% 0, 26% 35%, 40% 5%, 54% 40%, 68% 10%, 82% 45%, 100% 15%, 100% 100%, 0 100%); }
+  .art.food { background: radial-gradient(circle at 50% 55%, #f4c26b 0 22%, #b0532c 23% 34%, #6b3a22 35%); }
+  .art.food::before, .art.food::after { display: none; }
+  .art.music { background: linear-gradient(135deg, #2b3a67, #7b6fd6); }
+  .art.music::before { background: none; border: 3px solid rgba(255,255,255,.7); width: 26%; left: 37%; top: 30%; }
+  .art.music::after { display: none; }
+  .art.sea { background: linear-gradient(180deg, #7cc6e8, #2f7fb3 55%, #1c4f7a); }
+  .art.sea::before { background: #fff6cf; width: 12%; left: 20%; top: 18%; }
+  .art.sea::after { background: #1a3f63; clip-path: polygon(0 60%, 20% 45%, 40% 62%, 60% 44%, 80% 60%, 100% 46%, 100% 100%, 0 100%); }
+  .art.city { background: linear-gradient(180deg, #23243a, #3e3263); }
+  .art.city::before { background: #f7e8a6; width: 10%; left: 72%; top: 14%; }
+  .art.city::after { background: #12121e; clip-path: polygon(0 100%, 0 55%, 10% 55%, 10% 30%, 22% 30%, 22% 50%, 34% 50%, 34% 18%, 46% 18%, 46% 60%, 58% 60%, 58% 35%, 72% 35%, 72% 52%, 86% 52%, 86% 25%, 100% 25%, 100% 100%); height: 70%; }
+
+  /* Phone 1: the last saves as a shelf of pictures. */
+  .shelf { display: grid; grid-auto-flow: column; grid-auto-columns: 128px; gap: 10px; overflow-x: auto; scrollbar-width: none; margin: 0 -18px; padding: 0 18px; }
+  .card { display: grid; gap: 5px; }
+  .card .pic { aspect-ratio: 4 / 5; border-radius: 14px; }
+  .card .pic.audio { aspect-ratio: 4 / 5; display: grid; place-items: center; }
+  .card .tag { position: absolute; left: 7px; bottom: 7px; display: flex; gap: 4px; align-items: center; background: rgba(0,0,0,.55); color: #fff; font-size: 11px; padding: 2px 6px; border-radius: 6px; z-index: 2; }
+  .card b { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card small { color: var(--ph-muted); font-size: 11.5px; margin-top: -3px; }
+  .sources { display: flex; justify-content: space-between; }
+  .sources div { display: grid; justify-items: center; gap: 6px; font-size: 11.5px; color: var(--ph-muted); }
+  .sources i { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; font-style: normal; font-weight: 800; color: #fff; }
+
+  /* Phone 2: format icons, quality as a big value with its weight. */
+  .thumb { width: 100%; aspect-ratio: 16 / 9; border-radius: 14px; flex: none; }
+  .meta h3 { margin: 0; font: 600 16px/1.25 var(--font); }
+  .meta p { margin: 3px 0 0; color: var(--ph-muted); font-size: 13px; }
+  .choices { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; }
+  .choice { all: unset; cursor: pointer; display: grid; justify-items: center; gap: 3px; color: var(--ph-muted); }
+  .choice .ic { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: rgba(255,255,255,.06); transition: background .25s, color .25s, transform .35s cubic-bezier(.3,1.6,.5,1); }
+  .choice b { font-size: 13.5px; font-weight: 600; color: var(--ph-fg); }
+  .choice small { font-size: 11px; font-variant-numeric: tabular-nums; }
+  .choice[aria-checked="true"] .ic { background: var(--ph-accent); color: var(--ph-accent-ink); transform: scale(1.06); }
+  .choice[aria-checked="true"] b { color: var(--ph-accent); }
+  .choice:focus-visible { outline: 2px solid var(--ph-accent); }
+  svg.i { width: 20px; height: 20px; }
+  .quality { transition: opacity .25s, transform .3s; }
+  .quality.hide { opacity: 0; transform: translateY(-6px); pointer-events: none; }
+  .stepper { display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; }
+  .stepper button { all: unset; cursor: pointer; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: rgba(255,255,255,.07); font-size: 18px; }
+  .stepper button:disabled { opacity: .25; cursor: default; }
+  .stepper button:focus-visible { outline: 2px solid var(--ph-accent); }
+  .value { position: relative; height: 70px; overflow: hidden; text-align: center; }
+  .reel { position: absolute; inset: 0; display: flex; transition: transform .4s cubic-bezier(.3,1.25,.5,1); }
+  .cell { flex: 0 0 100%; display: grid; place-content: center; gap: 3px; }
+  .cell b { font: 800 30px/1 var(--round); font-variant-numeric: tabular-nums; }
+  .cell span { font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--ph-muted); }
+  .cell span em { font-style: normal; color: var(--ph-accent); font-weight: 600; }
+  .dots { display: flex; gap: 5px; justify-content: center; grid-column: 1 / -1; margin-top: 4px; }
+  .dots i { width: 5px; height: 5px; border-radius: 50%; background: rgba(255,255,255,.18); transition: background .2s, width .25s; }
+  .dots i.on { background: var(--ph-accent); width: 14px; border-radius: 3px; }
+  .bar { all: unset; cursor: pointer; position: absolute; left: 50%; transform: translateX(-50%); bottom: 24px; height: 50px; width: 250px; border-radius: 999px; z-index: 3; background: var(--ph-accent); color: var(--ph-accent-ink); display: flex; align-items: center; justify-content: center; gap: 6px; font: 600 16px var(--font); font-variant-numeric: tabular-nums; }
+  .bar small { font-weight: 500; opacity: .75; }
+  .bar:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+  .flyer { position: absolute; z-index: 5; border-radius: 14px; overflow: hidden; pointer-events: none; box-shadow: 0 10px 30px rgba(0,0,0,.45); }
+
+  /* Phone 3: Descargas as its own page. */
+  .seg { display: grid; grid-template-columns: repeat(3, 1fr); background: var(--ph-field); border-radius: 9px; padding: 2px; font-size: 13.5px; text-align: center; flex: none; }
+  .seg button { all: unset; cursor: pointer; padding: 6px; border-radius: 7px; }
+  .seg button[aria-pressed="true"] { background: #4a4e5a; font-weight: 600; }
+  .seg button:focus-visible { outline: 2px solid var(--ph-accent); }
+  .used { display: grid; gap: 6px; flex: none; }
+  .used .line { display: flex; justify-content: space-between; font-size: 13px; color: var(--ph-muted); font-variant-numeric: tabular-nums; }
+  .used .line b { color: var(--ph-fg); font-weight: 600; }
+  .used .meter { height: 6px; border-radius: 3px; background: rgba(255,255,255,.08); display: flex; overflow: hidden; gap: 2px; }
+  .used .meter i { display: block; height: 100%; }
+  .scroll { overflow-y: auto; scrollbar-width: none; display: grid; gap: 10px; padding-bottom: 40px; align-content: start; }
+  .day { font: 600 13px var(--font); color: var(--ph-muted); margin-top: 4px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .tile { display: grid; gap: 4px; }
+  .tile .pic { aspect-ratio: 1; border-radius: 14px; position: relative; }
+  .tile .pic .tag { position: absolute; left: 7px; bottom: 7px; background: rgba(0,0,0,.55); color: #fff; font-size: 11px; padding: 2px 6px; border-radius: 6px; z-index: 2; display: flex; gap: 4px; align-items: center; }
+  .tile b { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tile small { color: var(--ph-muted); font-size: 11.5px; margin-top: -2px; font-variant-numeric: tabular-nums; }
+  .tile[hidden] { display: none; }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } .flyer { display: none; } }
+</style>
+
+<div class="page">
+  <header>
+    <h1>Downloader y Descargas</h1>
+    <p>Lo descargado deja de ser una lista al fondo del Downloader. Al abrirlo ves tus últimas descargas en grande; el resto vive en su propia página, Descargas, a la que se entra con el botón de arriba a la derecha. Al terminar una descarga, la miniatura vuela a ese botón.</p>
+  </header>
+  <div class="phones">
+    <figure><div class="phone" id="p1"></div><figcaption><b>1 · Al abrir</b><span>Sin enlace: la barra para pegar, tus últimas descargas como fotos y las apps compatibles.</span></figcaption></figure>
+    <figure><div class="phone" id="p2"></div><figcaption><b>2 · Con un enlace</b><span>Formato con iconos, calidad en grande con su peso, y el peso también en el botón. Toca Descargar.</span></figcaption><button class="replay" id="replay" type="button">Ver la descarga otra vez</button></figure>
+    <figure><div class="phone" id="p3"></div><figcaption><b>3 · Descargas</b><span>Todo lo guardado en cuadrícula por día, con filtro por tipo y cuánto ocupa en el iPhone.</span></figcaption></figure>
+  </div>
+</div>
+
+<script>
+(() => {
+  const ICON = {
+    video: '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 9h18M3 15h18M8 5v4M16 5v4M8 15v4M16 15v4"/></svg>',
+    audio: '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18V5l11-2v13"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/></svg>',
+    thumbnail: '<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="6" y="3" width="15" height="12" rx="2.5"/><path d="M3 8v10a3 3 0 0 0 3 3h10"/></svg>',
+    tray: '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 3v11M7.5 9.5L12 14l4.5-4.5"/><path d="M4 14v3a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-3"/></svg>',
+    back: '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><path d="M15 5l-7 7 7 7"/></svg>',
+    link: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1"/><path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1"/></svg>',
+    paste: '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="8" y="3" width="11" height="14" rx="2"/><path d="M5 7v11a3 3 0 0 0 3 3h8"/></svg>',
+    play: '<svg width="9" height="9" viewBox="0 0 10 10"><path d="M2 1l7 4-7 4z" fill="#fff"/></svg>',
+    note: '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6"><path d="M9 18V5l11-2v13"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/></svg>',
+  };
+  const SAVED = [
+    { title: 'Atardecer en Paracas', art: '', kind: 'video', len: '4:12', size: '120 MB', day: 'Hoy' },
+    { title: 'Lomo saltado en 10 min', art: 'food', kind: 'video', len: '0:58', size: '24 MB', day: 'Hoy' },
+    { title: 'Lo-fi para estudiar', art: 'music', kind: 'audio', len: '1:02:10', size: '58 MB', day: 'Esta semana' },
+    { title: 'Playa Mancora al amanecer', art: 'sea', kind: 'video', len: '2:31', size: '64 MB', day: 'Esta semana' },
+    { title: 'Lima de noche', art: 'city', kind: 'image', len: 'Foto', size: '2,1 MB', day: 'Esta semana' },
+    { title: 'Podcast · Historia del Perú', art: 'music', kind: 'audio', len: '48:20', size: '45 MB', day: 'Octubre' },
+  ];
+  const status = '<div class="status"><span>3:59</span><i>●●● ᯤ 100%</i></div>';
+  const nav = (title, count) => `<div class="nav"><button class="round" type="button" aria-label="Atrás">${ICON.back}</button><h2>${title}</h2>${count == null ? '<span></span>' : `<button class="round tray" type="button" aria-label="Descargas, ${count}">${ICON.tray}<span class="badge">${count}</span></button>`}</div>`;
+  const tag = (s) => `<span class="tag">${s.kind === 'audio' ? ICON.note : s.kind === 'video' ? ICON.play : ''}${s.len}</span>`;
+
+  // Phone 1.
+  document.getElementById('p1').innerHTML = `<div class="glow"></div><div class="ui">${status}${nav('Downloader', 6)}
+    <div class="field"><span class="src link">${ICON.link}</span><span class="ph">Pega un enlace</span><b>${ICON.paste}</b></div>
+    <h4>Últimas descargas <small>Ver todo</small></h4>
+    <div class="shelf">${SAVED.slice(0, 4).map((s) => `<div class="card"><div class="pic art ${s.art}">${tag(s)}</div><b>${s.title}</b><small>${s.size}</small></div>`).join('')}</div>
+    <h4>Compatibles</h4>
+    <div class="sources"><div><i style="background:#ff0033">▶</i>YouTube</div><div><i style="background:#d62f78">◎</i>Instagram</div><div><i style="background:#1877f2">f</i>Facebook</div><div><i style="background:#fff;color:#000">X</i>X</div><div><i style="background:#fff;color:#000">♪</i>TikTok</div></div>
+  </div>`;
+
+  // Phone 2. Sizes are yt-dlp's estimate for each format (filesize or filesize_approx).
+  const Q = [
+    { h: 2160, name: '4K', mb: 410 }, { h: 1440, name: '2K', mb: 220 }, { h: 1080, name: 'Full HD', mb: 120 },
+    { h: 720, name: 'HD', mb: 64 }, { h: 480, name: 'SD', mb: 32 }, { h: 360, name: 'Ligera', mb: 19 },
+  ];
+  const FORMATS = { video: null, audio: { label: 'Audio', size: '4,1 MB', ext: 'M4A' }, thumbnail: { label: 'Miniatura', size: '180 KB', ext: 'JPG' } };
+  const p2 = document.getElementById('p2');
+  p2.innerHTML = `<div class="glow red"></div><div class="ui">${status}${nav('Downloader', 6)}
+    <div class="field"><span class="src yt"></span><span>youtube.com/watch?v=Kp3uG8sQx2A</span><b>✕</b></div>
+    <div class="thumb art" id="thumb"></div>
+    <div class="meta"><h3>Atardecer en Paracas · timelapse 4K</h3><p>Viajes del Sur · 4:12</p></div>
+    <div class="choices" role="radiogroup" aria-label="Formato">
+      <button class="choice" role="radio" aria-checked="true" data-mode="video"><span class="ic">${ICON.video}</span><b>Video</b><small class="vd"></small></button>
+      <button class="choice" role="radio" aria-checked="false" data-mode="audio"><span class="ic">${ICON.audio}</span><b>Audio</b><small>M4A · 4,1 MB</small></button>
+      <button class="choice" role="radio" aria-checked="false" data-mode="thumbnail"><span class="ic">${ICON.thumbnail}</span><b>Miniatura</b><small>JPG · 180 KB</small></button>
+    </div>
+    <div class="quality"><div class="stepper"><button type="button" class="prev" aria-label="Más calidad">‹</button><div class="value" aria-live="polite"><div class="reel">${Q.map((q) => `<div class="cell"><b>${q.h}p</b><span><em>${q.name}</em> · ≈ ${q.mb} MB</span></div>`).join('')}</div></div><button type="button" class="next" aria-label="Menos calidad">›</button><div class="dots">${Q.map(() => '<i></i>').join('')}</div></div></div>
+  </div><button class="bar" type="button" id="go"></button>`;
+  let mode = 'video', qi = 2;
+  const reel = p2.querySelector('.reel');
+  function update2() {
+    reel.style.transform = `translateX(${-qi * 100}%)`;
+    p2.querySelector('.prev').disabled = qi === 0;
+    p2.querySelector('.next').disabled = qi === Q.length - 1;
+    p2.querySelectorAll('.dots i').forEach((d, i) => d.classList.toggle('on', i === qi));
+    p2.querySelector('.vd').textContent = `${Q[qi].h}p · ${Q[qi].mb} MB`;
+    p2.querySelector('.quality').classList.toggle('hide', mode !== 'video');
+    const size = mode === 'video' ? `≈ ${Q[qi].mb} MB` : FORMATS[mode].size;
+    p2.querySelector('#go').innerHTML = `↓ Descargar <small>· ${size}</small>`;
+  }
+  p2.querySelector('.prev').addEventListener('click', () => { qi = Math.max(0, qi - 1); update2(); });
+  p2.querySelector('.next').addEventListener('click', () => { qi = Math.min(Q.length - 1, qi + 1); update2(); });
+  p2.querySelector('.choices').addEventListener('click', (e) => {
+    const pick = e.target.closest('.choice'); if (!pick) return;
+    mode = pick.dataset.mode;
+    p2.querySelectorAll('.choice').forEach((c) => c.setAttribute('aria-checked', String(c === pick)));
+    update2();
+  });
+  update2();
+
+  // Saving: the picture flies into the Descargas button, which counts one more.
+  let busy = false;
+  async function save() {
+    if (busy) return; busy = true;
+    const go = p2.querySelector('#go');
+    go.innerHTML = '✓ Guardado';
+    go.animate([{ transform: 'translateX(-50%) scale(.94)' }, { transform: 'translateX(-50%) scale(1.03)' }, { transform: 'translateX(-50%) scale(1)' }], { duration: 380, easing: 'ease-out' });
+    await new Promise((r) => setTimeout(r, 250));
+    const phoneBox = p2.getBoundingClientRect();
+    const from = p2.querySelector('#thumb').getBoundingClientRect();
+    const tray = p2.querySelector('.tray');
+    const to = tray.getBoundingClientRect();
+    const flyer = document.createElement('div');
+    flyer.className = 'flyer art';
+    p2.append(flyer);
+    const box = (l, t, w, h, r) => ({ left: `${l - phoneBox.left}px`, top: `${t - phoneBox.top}px`, width: `${w}px`, height: `${h}px`, borderRadius: `${r}px` });
+    const flight = flyer.animate([
+      box(from.left, from.top, from.width, from.height, 14),
+      box(from.left + 20, from.top - 30, from.width * 0.6, from.height * 0.6, 14),
+      box(to.left + 1, to.top + 1, to.width - 2, to.height - 2, 21),
+    ].map((f, i) => ({ ...f, opacity: i === 2 ? 0.2 : 1, offset: [0, 0.3, 1][i] })), { duration: 700, easing: 'cubic-bezier(.5,0,.3,1)', fill: 'forwards' });
+    p2.querySelector('#thumb').style.opacity = '.4';
+    await flight.finished;
+    flyer.remove();
+    const badge = tray.querySelector('.badge');
+    badge.textContent = '7';
+    tray.setAttribute('aria-label', 'Descargas, 7');
+    tray.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.25)' }, { transform: 'scale(.95)' }, { transform: 'scale(1)' }], { duration: 450, easing: 'ease-out' });
+    badge.animate([{ transform: 'scale(.4)' }, { transform: 'scale(1.3)' }, { transform: 'scale(1)' }], { duration: 400, easing: 'cubic-bezier(.3,1.6,.5,1)' });
+    p2.querySelector('#thumb').style.opacity = '';
+    busy = false;
+  }
+  p2.querySelector('#go').addEventListener('click', save);
+  document.getElementById('replay').addEventListener('click', () => {
+    p2.querySelector('.tray .badge').textContent = '6';
+    update2();
+    setTimeout(save, 200);
+  });
+
+  // Phone 3.
+  const p3 = document.getElementById('p3');
+  const days = [...new Set(SAVED.map((s) => s.day))];
+  p3.innerHTML = `<div class="glow"></div><div class="ui">${status}${nav('Descargas')}
+    <div class="seg" role="group" aria-label="Tipo"><button type="button" aria-pressed="true" data-k="all">Todo</button><button type="button" aria-pressed="false" data-k="video">Videos</button><button type="button" aria-pressed="false" data-k="audio">Audio</button></div>
+    <div class="used"><div class="line"><span><b>313 MB</b> en el iPhone</span><span>6 archivos</span></div><div class="meter"><i style="width:56%;background:var(--ph-accent)"></i><i style="width:33%;background:#5ec4b6"></i><i style="width:2%;background:#f2b34f"></i></div></div>
+    <div class="scroll">${days.map((d) => `<div class="day">${d}</div><div class="grid">${SAVED.filter((s) => s.day === d).map((s) => `<div class="tile" data-kind="${s.kind}"><div class="pic art ${s.art}">${tag(s)}</div><b>${s.title}</b><small>${s.size}</small></div>`).join('')}</div>`).join('')}</div>
+  </div>`;
+  p3.querySelector('.seg').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    p3.querySelectorAll('.seg button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    p3.querySelectorAll('.tile').forEach((t) => { t.hidden = b.dataset.k !== 'all' && t.dataset.kind !== b.dataset.k; });
+    p3.querySelectorAll('.day').forEach((day) => { const grid = day.nextElementSibling; const any = [...grid.children].some((t) => !t.hidden); day.hidden = !any; grid.hidden = !any; });
+  });
+})();
+</script>
