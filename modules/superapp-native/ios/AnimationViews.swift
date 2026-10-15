@@ -374,8 +374,9 @@ public final class TrashDropProps: UIBaseViewProps {
   var onFinish = EventDispatcher()
 }
 
-/// A deleted download falls into a bin: the bin rises, opens its lid, the
-/// picture arcs in, the lid slams, the bin squashes, wobbles, puffs and sinks.
+/// A deleted download falls into a bin inside a glass circle: the bin rises,
+/// its lid lifts back, the picture arcs into the mouth and drops behind the
+/// bin's front, the lid slams, the bin squashes, wobbles, puffs and sinks.
 public struct TrashDropView: ExpoSwiftUI.View {
   @ObservedObject public var props: TrashDropProps
   @State private var binUp = false
@@ -384,8 +385,12 @@ public struct TrashDropView: ExpoSwiftUI.View {
   @State private var wobble: Double = 0
   @State private var puff = false
   @State private var showPicture = false
+  /// 0 lifted, 1 top of the arc, 2 at the mouth, 3 inside the bin.
   @State private var stage = 0
   @State private var run = 0
+
+  private let glassSize: CGFloat = 112
+  private let binSize: CGFloat = 70
 
   public init(props: TrashDropProps) {
     self.props = props
@@ -394,39 +399,29 @@ public struct TrashDropView: ExpoSwiftUI.View {
   public var body: some View {
     GeometryReader { geo in
       let size = geo.size
-      let binCentre = CGPoint(x: size.width / 2, y: size.height - 74)
-      let mouth = CGPoint(x: binCentre.x, y: binCentre.y - 8)
-      let start = CGPoint(x: size.width / 2, y: size.height * 0.4)
-      let peak = CGPoint(x: size.width / 2 + 34, y: size.height * 0.4 - 46)
-      let place = stage == 0 ? start : stage == 1 ? peak : mouth
+      let centre = CGPoint(x: size.width / 2, y: size.height - 46 - glassSize / 2 + (binUp ? 0 : 200))
+      // The rim sits at 25 of the bin's 70 units.
+      let mouth = CGPoint(x: centre.x, y: centre.y + binSize * (25 / 70 - 0.5) - 2)
       ZStack {
+        glass
+          .position(centre)
+        layer(BinBack())
+          .position(centre)
         if showPicture {
-          picture
-            .frame(width: 150, height: 150)
-            .clipShape(RoundedRectangle(cornerRadius: stage == 0 ? 18 : 30, style: .continuous))
-            .shadow(color: .black.opacity(stage == 0 ? 0.35 : 0), radius: 18, y: 10)
-            .scaleEffect(stage == 0 ? 1 : stage == 1 ? 0.45 : 0.1)
-            .rotationEffect(.degrees(stage == 0 ? 0 : stage == 1 ? -14 : -32))
-            .opacity(stage == 2 ? 0.5 : 1)
-            .position(place)
+          picture(mouth: mouth, in: size)
         }
+        layer(BinFront())
+          .position(centre)
+        layer(BinLid(open: lid))
+          .position(centre)
         ForEach(0..<4, id: \.self) { index in
           let side = [-1.0, -0.45, 0.45, 1.0][index]
           Circle()
-            .fill(Color.white.opacity(0.8))
+            .fill(Color.white.opacity(0.85))
             .frame(width: 5, height: 5)
-            .position(x: mouth.x + side * (puff ? 30 : 14), y: mouth.y - (puff ? 12 + Double(index % 2) * 7 : 0))
-            .opacity(puff ? 0 : (stage == 3 ? 0.9 : 0))
+            .position(x: mouth.x + side * (puff ? 36 : 20), y: mouth.y - (puff ? 12 + Double(index % 2) * 7 : 0))
+            .opacity(puff ? 0 : (stage == 4 ? 0.9 : 0))
         }
-        Bin(lid: lid)
-          .frame(width: 46, height: 46)
-          .scaleEffect(x: squash.width, y: squash.height, anchor: .bottom)
-          .rotationEffect(.degrees(wobble), anchor: .bottom)
-          .frame(width: 78, height: 78)
-          .background(.ultraThinMaterial, in: Circle())
-          .overlay(Circle().strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
-          .shadow(color: .black.opacity(0.3), radius: 14, y: 8)
-          .position(x: binCentre.x, y: binCentre.y + (binUp ? 0 : 190))
       }
     }
     .allowsHitTesting(false)
@@ -435,7 +430,54 @@ public struct TrashDropView: ExpoSwiftUI.View {
     .onChange(of: props.trigger) { _ in play() }
   }
 
-  @ViewBuilder private var picture: some View {
+  /// One drawing layer of the bin, squashed and wobbled about its base.
+  private func layer<Content: View>(_ content: Content) -> some View {
+    content
+      .frame(width: binSize, height: binSize)
+      .scaleEffect(x: squash.width, y: squash.height, anchor: UnitPoint(x: 0.5, y: 0.95))
+      .rotationEffect(.degrees(wobble), anchor: UnitPoint(x: 0.5, y: 0.95))
+  }
+
+  @ViewBuilder private var glass: some View {
+    #if compiler(>=6.2)
+    if #available(iOS 26.0, *) {
+      Color.clear
+        .frame(width: glassSize, height: glassSize)
+        .glassEffect(.regular, in: Circle())
+        .shadow(color: .black.opacity(0.3), radius: 16, y: 10)
+    } else {
+      fallbackGlass
+    }
+    #else
+    fallbackGlass
+    #endif
+  }
+
+  private var fallbackGlass: some View {
+    Circle()
+      .fill(.ultraThinMaterial)
+      .overlay(Circle().strokeBorder(LinearGradient(colors: [.white.opacity(0.55), .white.opacity(0.08), .white.opacity(0.2)], startPoint: .top, endPoint: .bottom), lineWidth: 1))
+      .frame(width: glassSize, height: glassSize)
+      .shadow(color: .black.opacity(0.35), radius: 16, y: 10)
+  }
+
+  private func picture(mouth: CGPoint, in size: CGSize) -> some View {
+    let start = CGPoint(x: size.width / 2, y: size.height * 0.4)
+    let peak = CGPoint(x: (start.x + mouth.x) / 2 + 30, y: min(start.y, mouth.y) - 44)
+    let inside = CGPoint(x: mouth.x, y: mouth.y + 26)
+    let place = [start, peak, mouth, inside][min(stage, 3)]
+    let scale: CGFloat = [1, 0.42, 0.16, 0.12][min(stage, 3)]
+    let angle: Double = [0, -16, -34, -50][min(stage, 3)]
+    return pictureContent
+      .frame(width: 160, height: 160)
+      .clipShape(RoundedRectangle(cornerRadius: stage == 0 ? 18 : 40, style: .continuous))
+      .shadow(color: .black.opacity(stage == 0 ? 0.4 : 0), radius: 20, y: 12)
+      .scaleEffect(scale)
+      .rotationEffect(.degrees(angle))
+      .position(place)
+  }
+
+  @ViewBuilder private var pictureContent: some View {
     if let url = URL(string: props.image), !props.image.isEmpty {
       AsyncImage(url: url) { image in
         image.resizable().scaledToFill()
@@ -464,84 +506,179 @@ public struct TrashDropView: ExpoSwiftUI.View {
     let later = { (delay: Double, step: @escaping () -> Void) in
       DispatchQueue.main.asyncAfter(deadline: .now() + delay) { if current == run { step() } }
     }
-    later(0.02) { withAnimation(.spring(response: 0.42, dampingFraction: 0.68)) { binUp = true } }
-    later(0.3) { withAnimation(.spring(response: 0.26, dampingFraction: 0.55)) { lid = 1 } }
-    later(0.46) { withAnimation(.easeOut(duration: 0.24)) { stage = 1 } }
-    later(0.7) { withAnimation(.easeIn(duration: 0.24)) { stage = 2 } }
-    later(0.94) {
+    later(0.05) { withAnimation(.spring(response: 0.45, dampingFraction: 0.7)) { binUp = true } }
+    later(0.42) { withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) { lid = 1 } }
+    later(0.62) { withAnimation(.easeOut(duration: 0.26)) { stage = 1 } }
+    later(0.88) { withAnimation(.easeIn(duration: 0.26)) { stage = 2 } }
+    later(1.14) { withAnimation(.easeIn(duration: 0.16)) { stage = 3 } }
+    later(1.3) {
       showPicture = false
-      stage = 3
-      withAnimation(.easeIn(duration: 0.1)) { lid = 0 }
+      stage = 4
+      withAnimation(.easeIn(duration: 0.13)) { lid = 0 }
     }
-    later(1.04) {
+    later(1.43) {
       UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-      withAnimation(.easeOut(duration: 0.08)) { squash = CGSize(width: 1.14, height: 0.84) }
-      withAnimation(.easeOut(duration: 0.45)) { puff = true }
+      withAnimation(.easeOut(duration: 0.09)) { squash = CGSize(width: 1.1, height: 0.86) }
+      withAnimation(.easeOut(duration: 0.46)) { puff = true }
     }
-    later(1.12) {
+    later(1.52) {
       withAnimation(.spring(response: 0.3, dampingFraction: 0.45)) { squash = CGSize(width: 1, height: 1) }
-      wobble = -8
-      withAnimation(.spring(response: 0.36, dampingFraction: 0.25)) { wobble = 0 }
+      wobble = -7
+      withAnimation(.spring(response: 0.38, dampingFraction: 0.25)) { wobble = 0 }
     }
-    later(1.85) { withAnimation(.easeIn(duration: 0.28)) { binUp = false } }
-    later(2.15) {
+    later(2.35) { withAnimation(.easeIn(duration: 0.3)) { binUp = false } }
+    later(2.7) {
       stage = 0
       props.onFinish()
     }
   }
 }
 
-/// A bin whose lid hinges on its right end.
-private struct Bin: View {
-  var lid: Double
+// The bin is drawn on a 70 × 70 grid, the same one as the web mock-up.
+private func point(_ rect: CGRect, _ x: CGFloat, _ y: CGFloat) -> CGPoint {
+  CGPoint(x: rect.minX + x / 70 * rect.width, y: rect.minY + y / 70 * rect.height)
+}
+
+private var steel: LinearGradient {
+  LinearGradient(
+    stops: [
+      .init(color: Color(red: 0.36, green: 0.39, blue: 0.44), location: 0),
+      .init(color: Color(red: 0.85, green: 0.87, blue: 0.9), location: 0.22),
+      .init(color: Color(red: 0.96, green: 0.96, blue: 0.98), location: 0.42),
+      .init(color: Color(red: 0.66, green: 0.69, blue: 0.73), location: 0.7),
+      .init(color: Color(red: 0.35, green: 0.38, blue: 0.42), location: 1),
+    ],
+    startPoint: .leading, endPoint: .trailing
+  )
+}
+
+private var rim: LinearGradient {
+  LinearGradient(
+    stops: [
+      .init(color: Color(red: 0.54, green: 0.56, blue: 0.61), location: 0),
+      .init(color: .white, location: 0.35),
+      .init(color: Color(red: 0.49, green: 0.51, blue: 0.56), location: 1),
+    ],
+    startPoint: .leading, endPoint: .trailing
+  )
+}
+
+/// The shadow on the floor and the dark mouth, drawn behind the picture.
+private struct BinBack: View {
+  var body: some View {
+    GeometryReader { geo in
+      let rect = CGRect(origin: .zero, size: geo.size)
+      ZStack {
+        Ellipse()
+          .fill(RadialGradient(colors: [.black.opacity(0.55), .clear], center: .center, startRadius: 0, endRadius: rect.width * 20 / 70))
+          .frame(width: rect.width * 40 / 70, height: rect.height * 7.2 / 70)
+          .position(point(rect, 35, 66))
+        Ellipse()
+          .fill(RadialGradient(colors: [Color(red: 0.02, green: 0.02, blue: 0.04), Color(red: 0.16, green: 0.18, blue: 0.22)], center: UnitPoint(x: 0.5, y: 0.3), startRadius: 0, endRadius: rect.width * 18 / 70))
+          .frame(width: rect.width * 42 / 70, height: rect.height * 9.2 / 70)
+          .position(point(rect, 35, 25))
+      }
+    }
+  }
+}
+
+/// The body in front of the picture: tapered steel with embossed ribs and a rolled rim.
+private struct BinFront: View {
+  var body: some View {
+    ZStack {
+      BodyShape().fill(steel)
+      Ribs(offset: 0).stroke(Color(red: 0.12, green: 0.13, blue: 0.17).opacity(0.35), style: StrokeStyle(lineWidth: 1.4, lineCap: .round))
+      Ribs(offset: 1).stroke(Color.white.opacity(0.35), style: StrokeStyle(lineWidth: 1, lineCap: .round))
+      RimCurve(left: 14, right: 56, y: 25, sag: 5.6).stroke(rim, style: StrokeStyle(lineWidth: 3.2, lineCap: .round))
+    }
+  }
+
+  private struct BodyShape: Shape {
+    func path(in rect: CGRect) -> Path {
+      var path = Path()
+      path.move(to: point(rect, 14, 25))
+      path.addQuadCurve(to: point(rect, 56, 25), control: point(rect, 35, 30.6))
+      path.addLine(to: point(rect, 51.6, 61.5))
+      path.addQuadCurve(to: point(rect, 48, 65), control: point(rect, 51.2, 64.6))
+      path.addQuadCurve(to: point(rect, 22, 65), control: point(rect, 35, 67))
+      path.addQuadCurve(to: point(rect, 18.4, 61.5), control: point(rect, 18.8, 64.6))
+      path.closeSubpath()
+      return path
+    }
+  }
+
+  private struct Ribs: Shape {
+    var offset: CGFloat
+    func path(in rect: CGRect) -> Path {
+      var path = Path()
+      let lines: [(CGFloat, CGFloat, CGFloat, CGFloat)] = [(24, 32, 25.6, 60), (31, 33, 31.6, 61.5), (39, 33, 38.4, 61.5), (46, 32, 44.4, 60)]
+      for line in lines {
+        path.move(to: point(rect, line.0 + offset, line.1))
+        path.addLine(to: point(rect, line.2 + offset, line.3))
+      }
+      return path
+    }
+  }
+}
+
+/// A shallow curve across the bin, for the rims.
+private struct RimCurve: Shape {
+  var left: CGFloat
+  var right: CGFloat
+  var y: CGFloat
+  var sag: CGFloat
+  func path(in rect: CGRect) -> Path {
+    var path = Path()
+    path.move(to: point(rect, left, y))
+    path.addQuadCurve(to: point(rect, right, y), control: point(rect, (left + right) / 2, y + sag))
+    return path
+  }
+}
+
+/// A domed lid with a handle. Open, it lifts and tips back to the right so
+/// the mouth shows.
+private struct BinLid: View {
+  var open: Double
 
   var body: some View {
-    ZStack(alignment: .top) {
-      BinBody()
-        .fill(LinearGradient(colors: [Color(white: 0.9), Color(white: 0.76), Color(white: 0.62)], startPoint: .leading, endPoint: .trailing))
-        .overlay(BinRibs().stroke(Color.black.opacity(0.22), style: StrokeStyle(lineWidth: 1.6, lineCap: .round)))
-        .frame(width: 22, height: 24)
-        .offset(y: 19)
-      VStack(spacing: -1.5) {
-        RoundedRectangle(cornerRadius: 1.8)
-          .strokeBorder(Color(white: 0.86), lineWidth: 2)
-          .frame(width: 9, height: 6)
-        Capsule()
-          .fill(Color(white: 0.93))
-          .frame(width: 26, height: 4.4)
-      }
-      .frame(width: 26, height: 9)
-      .rotationEffect(.degrees(-112 * lid), anchor: .bottomTrailing)
-      .offset(x: 2 * lid, y: 9.5 - 2 * lid)
+    ZStack {
+      Dome().fill(steel)
+      RimCurve(left: 12.5, right: 57.5, y: 24.6, sag: 5.4).stroke(rim, style: StrokeStyle(lineWidth: 2.6, lineCap: .round))
+      RimCurve(left: 18, right: 52, y: 19.5, sag: -4.5).stroke(Color.white.opacity(0.55), style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
+      Handle().fill(steel)
+      Handle().stroke(Color(red: 0.16, green: 0.17, blue: 0.21).opacity(0.35), lineWidth: 0.8)
+      HandleShine().fill(Color.white.opacity(0.7))
     }
-    .frame(width: 46, height: 46, alignment: .top)
+    .rotation3DEffect(.degrees(40 * open), axis: (x: 1, y: 0, z: 0), anchor: UnitPoint(x: 0.5, y: 0.36), perspective: 0.45)
+    .rotationEffect(.degrees(24 * open), anchor: UnitPoint(x: 0.5, y: 0.36))
+    .offset(x: 8 * open, y: -15 * open)
   }
-}
 
-private struct BinBody: Shape {
-  func path(in rect: CGRect) -> Path {
-    let inset = rect.width * 0.1
-    var path = Path()
-    path.move(to: CGPoint(x: rect.minX, y: rect.minY))
-    path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
-    path.addLine(to: CGPoint(x: rect.maxX - inset, y: rect.maxY - 3))
-    path.addQuadCurve(to: CGPoint(x: rect.maxX - inset - 3, y: rect.maxY), control: CGPoint(x: rect.maxX - inset, y: rect.maxY))
-    path.addLine(to: CGPoint(x: rect.minX + inset + 3, y: rect.maxY))
-    path.addQuadCurve(to: CGPoint(x: rect.minX + inset, y: rect.maxY - 3), control: CGPoint(x: rect.minX + inset, y: rect.maxY))
-    path.closeSubpath()
-    return path
-  }
-}
-
-private struct BinRibs: Shape {
-  func path(in rect: CGRect) -> Path {
-    var path = Path()
-    for fraction in [0.3, 0.5, 0.7] {
-      let x = rect.minX + rect.width * fraction
-      let lean = (fraction - 0.5) * rect.width * 0.08
-      path.move(to: CGPoint(x: x, y: rect.minY + 4))
-      path.addLine(to: CGPoint(x: x - lean, y: rect.maxY - 4))
+  private struct Dome: Shape {
+    func path(in rect: CGRect) -> Path {
+      var path = Path()
+      path.move(to: point(rect, 12.5, 24.6))
+      path.addQuadCurve(to: point(rect, 35, 14.5), control: point(rect, 14, 15.5))
+      path.addQuadCurve(to: point(rect, 57.5, 24.6), control: point(rect, 56, 15.5))
+      path.addQuadCurve(to: point(rect, 12.5, 24.6), control: point(rect, 35, 30))
+      path.closeSubpath()
+      return path
     }
-    return path
+  }
+
+  private struct Handle: Shape {
+    func path(in rect: CGRect) -> Path {
+      let origin = point(rect, 28, 9)
+      let size = CGSize(width: rect.width * 14 / 70, height: rect.height * 6.5 / 70)
+      return Path(roundedRect: CGRect(origin: origin, size: size), cornerRadius: rect.width * 3.2 / 70)
+    }
+  }
+
+  private struct HandleShine: Shape {
+    func path(in rect: CGRect) -> Path {
+      let origin = point(rect, 30.5, 10.2)
+      let size = CGSize(width: rect.width * 7 / 70, height: rect.height * 1.4 / 70)
+      return Path(roundedRect: CGRect(origin: origin, size: size), cornerRadius: rect.width * 0.7 / 70)
+    }
   }
 }
