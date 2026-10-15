@@ -15,7 +15,7 @@ Pod::Spec.new do |s|
 
   # Downloaded by scripts/ipa/fetch-python.sh; not kept in git.
   s.vendored_frameworks = 'Python.xcframework'
-  s.frameworks = 'ActivityKit', 'AVFoundation', 'CoreImage', 'JavaScriptCore', 'UIKit', 'WidgetKit'
+  s.frameworks = 'ActivityKit', 'AVFoundation', 'CoreImage', 'JavaScriptCore', 'Photos', 'UIKit', 'WidgetKit'
 
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',

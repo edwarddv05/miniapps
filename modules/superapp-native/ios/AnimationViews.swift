@@ -385,8 +385,10 @@ public struct TrashDropView: ExpoSwiftUI.View {
   @State private var wobble: Double = 0
   @State private var puff = false
   @State private var showPicture = false
-  /// 0 lifted, 1 top of the arc, 2 at the mouth, 3 inside the bin.
-  @State private var stage = 0
+  /// 0 where the picture starts, 1 inside the bin, along one curve.
+  @State private var flight: Double = 0
+  @State private var dots = false
+  @State private var picture: UIImage?
   @State private var run = 0
 
   private let glassSize: CGFloat = 112
@@ -399,16 +401,19 @@ public struct TrashDropView: ExpoSwiftUI.View {
   public var body: some View {
     GeometryReader { geo in
       let size = geo.size
-      let centre = CGPoint(x: size.width / 2, y: size.height - 46 - glassSize / 2 + (binUp ? 0 : 200))
-      // The rim sits at 25 of the bin's 70 units.
+      let resting = CGPoint(x: size.width / 2, y: size.height - 46 - glassSize / 2)
+      let centre = CGPoint(x: resting.x, y: resting.y + (binUp ? 0 : 200))
+      // The rim sits at 25 of the bin's 70 units. The picture aims at the
+      // resting bin, which has risen by the time it gets there.
       let mouth = CGPoint(x: centre.x, y: centre.y + binSize * (25 / 70 - 0.5) - 2)
+      let restingMouth = CGPoint(x: resting.x, y: resting.y + binSize * (25 / 70 - 0.5) - 2)
       ZStack {
         glass
           .position(centre)
         layer(BinBack())
           .position(centre)
         if showPicture {
-          picture(mouth: mouth, in: size)
+          flyingPicture(mouth: restingMouth, in: size)
         }
         layer(BinFront())
           .position(centre)
@@ -420,7 +425,7 @@ public struct TrashDropView: ExpoSwiftUI.View {
             .fill(Color.white.opacity(0.85))
             .frame(width: 5, height: 5)
             .position(x: mouth.x + side * (puff ? 36 : 20), y: mouth.y - (puff ? 12 + Double(index % 2) * 7 : 0))
-            .opacity(puff ? 0 : (stage == 4 ? 0.9 : 0))
+            .opacity(puff ? 0 : (dots ? 0.9 : 0))
         }
       }
     }
@@ -461,32 +466,42 @@ public struct TrashDropView: ExpoSwiftUI.View {
       .shadow(color: .black.opacity(0.35), radius: 16, y: 10)
   }
 
-  private func picture(mouth: CGPoint, in size: CGSize) -> some View {
+  private func flyingPicture(mouth: CGPoint, in size: CGSize) -> some View {
     let start = CGPoint(x: size.width / 2, y: size.height * 0.4)
-    let peak = CGPoint(x: (start.x + mouth.x) / 2 + 30, y: min(start.y, mouth.y) - 44)
+    let control = CGPoint(x: (start.x + mouth.x) / 2 + 60, y: min(start.y, mouth.y) - 150)
     let inside = CGPoint(x: mouth.x, y: mouth.y + 26)
-    let place = [start, peak, mouth, inside][min(stage, 3)]
-    let scale: CGFloat = [1, 0.42, 0.16, 0.12][min(stage, 3)]
-    let angle: Double = [0, -16, -34, -50][min(stage, 3)]
     return pictureContent
       .frame(width: 160, height: 160)
-      .clipShape(RoundedRectangle(cornerRadius: stage == 0 ? 18 : 40, style: .continuous))
-      .shadow(color: .black.opacity(stage == 0 ? 0.4 : 0), radius: 20, y: 12)
-      .scaleEffect(scale)
-      .rotationEffect(.degrees(angle))
-      .position(place)
+      .modifier(PictureFlight(progress: flight, start: start, control: control, end: inside))
   }
 
   @ViewBuilder private var pictureContent: some View {
-    if let url = URL(string: props.image), !props.image.isEmpty {
-      AsyncImage(url: url) { image in
-        image.resizable().scaledToFill()
-      } placeholder: {
-        props.tile
-      }
+    if let picture {
+      Image(uiImage: picture).resizable().scaledToFill()
     } else {
       props.tile
     }
+  }
+
+  /// Loads the picture before the flight so it never shows a placeholder;
+  /// a slow remote picture gets a short wait and then the plain tile.
+  private func loadPicture(_ done: @escaping () -> Void) {
+    picture = nil
+    guard !props.image.isEmpty, let url = URL(string: props.image) else { return done() }
+    if url.isFileURL {
+      picture = UIImage(contentsOfFile: url.path)
+      return done()
+    }
+    var started = false
+    let begin = { if !started { started = true; done() } }
+    URLSession.shared.dataTask(with: url) { data, _, _ in
+      let image = data.flatMap { UIImage(data: $0) }
+      DispatchQueue.main.async {
+        if !started { picture = image }
+        begin()
+      }
+    }.resume()
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: begin)
   }
 
   private func play() {
@@ -500,37 +515,73 @@ public struct TrashDropView: ExpoSwiftUI.View {
       squash = CGSize(width: 1, height: 1)
       wobble = 0
       puff = false
-      stage = 0
-      showPicture = true
+      dots = false
+      flight = 0
+      showPicture = false
     }
+    loadPicture {
+      guard current == run else { return }
+      animate(current)
+    }
+  }
+
+  private func animate(_ current: Int) {
     let later = { (delay: Double, step: @escaping () -> Void) in
       DispatchQueue.main.asyncAfter(deadline: .now() + delay) { if current == run { step() } }
     }
-    later(0.05) { withAnimation(.spring(response: 0.45, dampingFraction: 0.7)) { binUp = true } }
-    later(0.42) { withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) { lid = 1 } }
-    later(0.62) { withAnimation(.easeOut(duration: 0.26)) { stage = 1 } }
-    later(0.88) { withAnimation(.easeIn(duration: 0.26)) { stage = 2 } }
-    later(1.14) { withAnimation(.easeIn(duration: 0.16)) { stage = 3 } }
-    later(1.3) {
+    showPicture = true
+    withAnimation(.spring(response: 0.42, dampingFraction: 0.78)) { binUp = true }
+    // One eased curve from the picture to the inside of the bin: it eases out
+    // of its place, keeps moving over the arc and speeds into the mouth.
+    later(0.06) { withAnimation(.timingCurve(0.42, 0, 0.62, 1, duration: 0.78)) { flight = 1 } }
+    later(0.24) { withAnimation(.spring(response: 0.32, dampingFraction: 0.7)) { lid = 1 } }
+    later(0.84) {
       showPicture = false
-      stage = 4
+      dots = true
       withAnimation(.easeIn(duration: 0.13)) { lid = 0 }
     }
-    later(1.43) {
+    later(0.97) {
       UIImpactFeedbackGenerator(style: .medium).impactOccurred()
       withAnimation(.easeOut(duration: 0.09)) { squash = CGSize(width: 1.1, height: 0.86) }
       withAnimation(.easeOut(duration: 0.46)) { puff = true }
     }
-    later(1.52) {
+    later(1.06) {
       withAnimation(.spring(response: 0.3, dampingFraction: 0.45)) { squash = CGSize(width: 1, height: 1) }
       wobble = -7
       withAnimation(.spring(response: 0.38, dampingFraction: 0.25)) { wobble = 0 }
     }
-    later(2.35) { withAnimation(.easeIn(duration: 0.3)) { binUp = false } }
-    later(2.7) {
-      stage = 0
+    later(1.85) { withAnimation(.easeIn(duration: 0.3)) { binUp = false } }
+    later(2.2) {
+      flight = 0
       props.onFinish()
     }
+  }
+}
+
+/// Places the picture on a curve by one progress value, so the whole flight
+/// is a single animation: it shrinks, turns and rounds as it goes.
+private struct PictureFlight: ViewModifier, Animatable {
+  var progress: Double
+  let start: CGPoint
+  let control: CGPoint
+  let end: CGPoint
+
+  var animatableData: Double {
+    get { progress }
+    set { progress = newValue }
+  }
+
+  func body(content: Content) -> some View {
+    let t = progress
+    let u = 1 - t
+    let x = u * u * start.x + 2 * u * t * control.x + t * t * end.x
+    let y = u * u * start.y + 2 * u * t * control.y + t * t * end.y
+    return content
+      .clipShape(RoundedRectangle(cornerRadius: 18 + 30 * t, style: .continuous))
+      .shadow(color: .black.opacity(0.4 * u), radius: 20, y: 12)
+      .scaleEffect(1 - 0.88 * t)
+      .rotationEffect(.degrees(-50 * t))
+      .position(x: x, y: y)
   }
 }
 

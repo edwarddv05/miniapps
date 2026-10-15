@@ -11,6 +11,10 @@ public class SuperappNativeModule: Module {
   public func definition() -> ModuleDefinition {
     Name("SuperappNative")
 
+    OnCreate {
+      BackgroundDownload.hideInternalFolders()
+    }
+
     AsyncFunction("python") { (name: String, payload: String, promise: Promise) in
       self.pythonQueue.async {
         promise.resolve(SuperappPythonCall(name, payload))

@@ -1,5 +1,6 @@
 import ActivityKit
 import Foundation
+import Photos
 import UIKit
 
 /// The Live Activity of a download started from Shortcuts. The widget
@@ -40,9 +41,11 @@ public struct DownloadActivityAttributes: ActivityAttributes {
 /// AVFoundation joining as the Downloader, with progress in a Live Activity.
 /// Finished files go to Documents/downloads and are listed in
 /// background.json, which the app adds to Descargas when it next opens.
+/// `destination` also puts a copy in Photos ("photos") or in the app's folder
+/// in Files ("files"); anything else keeps it in the app only.
 public enum BackgroundDownload {
   /// Returns the saved file and the name it should carry outside the app.
-  public static func run(url: URL, mode requested: String, quality: Int?) async throws -> (file: URL, filename: String) {
+  public static func run(url: URL, mode requested: String, quality: Int?, destination: String = "app") async throws -> (file: URL, filename: String) {
     let host = (url.host ?? "enlace").replacingOccurrences(of: "www.", with: "")
     var state = DownloadActivityAttributes.ContentState(stage: "analyzing", title: host, detail: "Analizando enlace…", fraction: -1)
     let activity: Activity<DownloadActivityAttributes>? = ActivityAuthorizationInfo().areActivitiesEnabled
@@ -156,7 +159,8 @@ public enum BackgroundDownload {
 
       state.stage = "done"
       state.fraction = 1
-      state.detail = ["Guardado", size.map { formatBytes($0) }].compactMap { $0 }.joined(separator: " · ")
+      let place = await keep(target, filename: filename, mimeType: mimeType, in: destination)
+      state.detail = [place, size.map { formatBytes($0) }].compactMap { $0 }.joined(separator: " · ")
       await activity?.end(ActivityContent(state: state, staleDate: nil), dismissalPolicy: .after(Date().addingTimeInterval(15 * 60)))
       return (target, filename.replacingOccurrences(of: "/", with: "-"))
     } catch {
@@ -165,6 +169,91 @@ public enum BackgroundDownload {
       state.etaSeconds = nil
       await activity?.end(ActivityContent(state: state, staleDate: nil), dismissalPolicy: .after(Date().addingTimeInterval(15 * 60)))
       throw error
+    }
+  }
+
+  // MARK: Destinations
+
+  /// Copies the finished file where the action asked and says where it is.
+  /// A failure here still leaves the file in Descargas.
+  private static func keep(_ file: URL, filename: String, mimeType: String, in destination: String) async -> String {
+    let isVideo = mimeType.hasPrefix("video/")
+    let isImage = mimeType.hasPrefix("image/")
+    switch destination {
+    case "photos" where isVideo || isImage:
+      let access = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+      guard access == .authorized || access == .limited else { return "En Descargas · Fotos sin permiso" }
+      do {
+        try await saveToPhotos(file, filename: filename, video: isVideo)
+        return "Guardado en Fotos"
+      } catch {
+        return "En Descargas · no se pudo guardar en Fotos"
+      }
+    case "photos", "files":
+      // Audio cannot go to Photos, so it goes to Files.
+      do {
+        try saveToFiles(file, filename: filename)
+        return "Guardado en Archivos"
+      } catch {
+        return "En Descargas · no se pudo guardar en Archivos"
+      }
+    default:
+      return "Guardado"
+    }
+  }
+
+  private static func saveToPhotos(_ file: URL, filename: String, video: Bool) async throws {
+    // Photos takes JPEG, PNG and HEIC; other pictures (WebP) become JPEG.
+    let ext = file.pathExtension.lowercased()
+    let photoData: Data? = video || ["jpg", "jpeg", "png", "heic"].contains(ext)
+      ? nil
+      : UIImage(contentsOfFile: file.path)?.jpegData(compressionQuality: 0.92)
+    try await PHPhotoLibrary.shared().performChanges {
+      let request = PHAssetCreationRequest.forAsset()
+      let options = PHAssetResourceCreationOptions()
+      options.originalFilename = filename
+      if let photoData {
+        request.addResource(with: .photo, data: photoData, options: options)
+      } else {
+        request.addResource(with: video ? .video : .photo, fileURL: file, options: options)
+      }
+    }
+  }
+
+  /// Documents/Descargas is the app's folder in Files. The copy is a hard
+  /// link, so it takes no extra space and survives deleting it in the app.
+  private static func saveToFiles(_ file: URL, filename: String) throws {
+    let manager = FileManager.default
+    let documents = try manager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+    let folder = documents.appendingPathComponent("Descargas", isDirectory: true)
+    try manager.createDirectory(at: folder, withIntermediateDirectories: true)
+    hideInternalFolders()
+    let clean = filename.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+    let base = (clean as NSString).deletingPathExtension
+    let ext = (clean as NSString).pathExtension
+    var target = folder.appendingPathComponent(clean)
+    var copy = 2
+    while manager.fileExists(atPath: target.path) {
+      target = folder.appendingPathComponent(ext.isEmpty ? "\(base) \(copy)" : "\(base) \(copy).\(ext)")
+      copy += 1
+    }
+    do {
+      try manager.linkItem(at: file, to: target)
+    } catch {
+      try manager.copyItem(at: file, to: target)
+    }
+  }
+
+  /// The app's own folders stay out of the Files listing, which only shows
+  /// Descargas.
+  public static func hideInternalFolders() {
+    guard let documents = try? FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true) else { return }
+    for name in ["downloads", "cards"] {
+      var folder = documents.appendingPathComponent(name, isDirectory: true)
+      guard FileManager.default.fileExists(atPath: folder.path) else { continue }
+      var values = URLResourceValues()
+      values.isHidden = true
+      try? folder.setResourceValues(values)
     }
   }
 

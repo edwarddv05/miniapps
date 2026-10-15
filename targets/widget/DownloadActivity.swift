@@ -142,14 +142,16 @@ private struct DownloadLockView: View {
       if !state.finished {
         DownloadBar(state: state)
       }
-      HStack {
-        Text(state.finished ? (state.stage == "done" ? "Toca para abrir Descargas" : "Ábrelo en la app para reintentar") : state.progressLine ?? host)
-        Spacer()
-        if let eta = state.etaLine { Text(eta) }
+      if !state.finished {
+        HStack {
+          Text(state.progressLine ?? host)
+          Spacer()
+          if let eta = state.etaLine { Text(eta) }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .monospacedDigit()
       }
-      .font(.caption)
-      .foregroundStyle(.secondary)
-      .monospacedDigit()
     }
     .padding(16)
   }

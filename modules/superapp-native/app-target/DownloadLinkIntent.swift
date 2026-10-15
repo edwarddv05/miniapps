@@ -50,6 +50,20 @@ enum DownloadQualityOption: String, AppEnum {
 }
 
 @available(iOS 17.0, *)
+enum DownloadDestinationOption: String, AppEnum {
+  case photos
+  case files
+  case app
+
+  static let typeDisplayRepresentation: TypeDisplayRepresentation = "Guardar en"
+  static let caseDisplayRepresentations: [DownloadDestinationOption: DisplayRepresentation] = [
+    .photos: "Fotos",
+    .files: "Archivos",
+    .app: "Solo la app",
+  ]
+}
+
+@available(iOS 17.0, *)
 struct DownloadLinkIntent: AppIntent, LiveActivityIntent {
   static let title: LocalizedStringResource = "Descargar enlace"
   static let description = IntentDescription("Descarga un video, su audio o su miniatura con el progreso en una Live Activity. El archivo aparece en Descargas.")
@@ -64,14 +78,17 @@ struct DownloadLinkIntent: AppIntent, LiveActivityIntent {
   @Parameter(title: "Calidad", default: .p1080)
   var quality: DownloadQualityOption
 
+  @Parameter(title: "Guardar en", default: .photos)
+  var destination: DownloadDestinationOption
+
   static var parameterSummary: some ParameterSummary {
-    Summary("Descargar \(\.$url) como \(\.$format) en \(\.$quality)")
+    Summary("Descargar \(\.$url) como \(\.$format) en \(\.$quality) y guardar en \(\.$destination)")
   }
 
   // The file is the action's output, so the next action can save it to
   // Photos or Files.
   func perform() async throws -> some IntentResult & ReturnsValue<IntentFile> {
-    let saved = try await BackgroundDownload.run(url: url, mode: format.rawValue, quality: format == .video ? quality.height : nil)
+    let saved = try await BackgroundDownload.run(url: url, mode: format.rawValue, quality: format == .video ? quality.height : nil, destination: destination.rawValue)
     let type = UTType(filenameExtension: saved.file.pathExtension) ?? .data
     return .result(value: IntentFile(fileURL: saved.file, filename: saved.filename, type: type))
   }
