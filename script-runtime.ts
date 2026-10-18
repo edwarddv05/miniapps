@@ -183,6 +183,26 @@ export function staticMeta(source: string, fileName: string): ScriptMeta {
   return readMeta({ meta }, fileName);
 }
 
+const IMAGE_ID = /^img-[a-z0-9]+-[a-z0-9]+$/;
+
+/** A new name for an image a miniapp keeps. Only names of this shape are ever read or deleted. */
+export function newImageId(now = Date.now(), random = Math.random()) {
+  return `img-${now.toString(36)}-${Math.floor(random * 36 ** 6).toString(36).padStart(6, '0')}`;
+}
+
+export function isImageId(value: unknown): value is string {
+  return typeof value === 'string' && IMAGE_ID.test(value);
+}
+
+/** Longest side of a stored image and of its thumbnail, in pixels. */
+export function imageSizes(width: number, height: number) {
+  const fit = (limit: number) => {
+    const scale = Math.min(1, limit / Math.max(width, height, 1));
+    return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
+  };
+  return { full: fit(1600), thumb: fit(480) };
+}
+
 export function scriptDataKey(fileName: string) {
   return `${SCRIPT_DATA_PREFIX}${fileName}`;
 }

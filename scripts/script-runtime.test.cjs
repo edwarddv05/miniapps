@@ -87,3 +87,16 @@ test('the new-file template compiles and runs', () => {
   assert.equal(runtime.scriptComponent(exports)({}).type, 'VStack');
   assert.equal(runtime.staticMeta(runtime.NEW_SCRIPT, 'Nueva.js').title, 'Nueva');
 });
+
+test('image names have one shape, and only that shape is accepted', () => {
+  const id = runtime.newImageId(1_760_000_000_000, 0.5);
+  assert.equal(runtime.isImageId(id), true);
+  assert.equal(runtime.isImageId('../notas.js'), false);
+  assert.equal(runtime.isImageId('img-x/../../y'), false);
+  assert.equal(runtime.isImageId(42), false);
+});
+
+test('stored images keep their shape within 1600 px, thumbnails within 480 px', () => {
+  assert.deepEqual(runtime.imageSizes(4032, 3024), { full: { width: 1600, height: 1200 }, thumb: { width: 480, height: 360 } });
+  assert.deepEqual(runtime.imageSizes(800, 1200), { full: { width: 800, height: 1200 }, thumb: { width: 320, height: 480 } });
+});

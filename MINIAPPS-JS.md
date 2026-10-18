@@ -57,8 +57,9 @@ Todos aceptan `padding`, `width`, `height`, `minHeight`, `maxWidth`, `maxHeight`
 | `Row` | `label`, `value`, `icon`, `color`, `onPress` |
 | `Button` | `title`, `icon`, `onPress`, `style` (`prominent`, `glass`, `bordered`, `plain`, `destructive`), `color` |
 | `IconButton` | Botón redondo de vidrio. `icon`, `label`, `onPress`, `prominent`, `busy` |
-| `Image` | `symbol`, `size`, `color` |
-| `TextField` | `value`, `onChange`, `onSubmit`, `placeholder`, `multiline`, `keyboard` (`number`, `decimal`, `email`, `url`, `phone`), `autocorrect` |
+| `Image` | Un SF Symbol. `symbol`, `size`, `color` |
+| `Photo` | Una foto guardada por la miniapp. `id`, `thumb` (copia pequeña, para listas), `mode` (`fill` recorta, `fit` entra completa), `aspect`, `radius` |
+| `TextField` | `value`, `onChange`, `onSubmit`, `placeholder`, `multiline`, `lines` (líneas visibles; `0` crece sin límite), `plain` (sin borde), `keyboard` (`number`, `decimal`, `email`, `url`, `phone`), `autocorrect` |
 | `Toggle` | `label`, `icon`, `value`, `onChange` |
 | `Slider` | `value`, `min`, `max`, `step`, `onChange` |
 | `Stepper` | `label`, `value`, `min`, `max`, `step`, `onChange` |
@@ -83,6 +84,7 @@ Para lo que no cubren, `SwiftUI` trae todos los componentes de `@expo/ui/swift-u
 - `haptic(tipo)`: `light`, `medium`, `heavy`, `selection`, `success`, `warning`, `error`.
 - `await alert(título, mensaje)`, `await confirm(título, mensaje, { confirm, destructive })` devuelve `true`/`false`, `await prompt(título, mensaje, inicial)` devuelve el texto o `null`.
 - `close()`: cierra la miniapp.
+- `await pickImages({ multiple, limit })` abre la galería y `await takePhoto()` la cámara. Devuelven `{ id, width, height }`: una lista en el primer caso, o `null` si se cancela en el segundo. Las fotos se copian a la carpeta de la miniapp, con un máximo de 1600 px y una miniatura de 480 px, así que siguen ahí aunque las borres de Fotos. Se muestran con `<Photo id={…} />`. Guarda el `id` (por ejemplo con `useStored`) y llama a `deleteImage(id)` cuando ya no la necesites. Al eliminar la miniapp se borran sus fotos.
 - `share(texto)`, `openURL(url)`, `clipboard.get()`, `clipboard.set(texto)`.
 - `fetch`, `setTimeout` y `setInterval`. Los temporizadores se detienen al salir de la miniapp.
 

@@ -3,6 +3,7 @@
 
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
 import { Accelerometer } from 'expo-sensors';
 import { Host } from '@expo/ui';
 import * as SwiftUI from '@expo/ui/swift-ui';
@@ -17,7 +18,7 @@ import { UI } from '../ui-structure';
 import { createShakeDetector } from '../shake-detector';
 import type { ScheduleColor } from '../schedule-data';
 import { NEW_SCRIPT, ScriptError, baseName, checkScript, evaluateScript, parseScriptData, readMeta, scriptComponent, scriptFileName, staticMeta, type ScriptMeta } from '../script-runtime';
-import { deleteScript, importScripts, loadScriptData, readScript, refreshScripts, renameScript, saveScriptData, shareScript, useScripts, writeScript, type ScriptFile } from '../script-files';
+import { deleteScript, deleteScriptImage, importScripts, loadScriptData, readScript, refreshScripts, renameScript, saveScriptData, saveScriptImage, scriptImageUri, shareScript, useScripts, writeScript, type ScriptFile } from '../script-files';
 import { CIRCLE_CONTROL_SIZE, MiniappRowNative, NativeCircleButton, PageNative, SectionHeadingNative, SymbolImage, colorForKey, nativeGlassAvailable, textModifiers, usePageWidth, withAlpha, type ThemeTokens } from './shared';
 
 // ---------------------------------------------------------------------------
@@ -26,6 +27,8 @@ import { CIRCLE_CONTROL_SIZE, MiniappRowNative, NativeCircleButton, PageNative, 
 
 const TokensContext = createContext<ThemeTokens | null>(null);
 const InListContext = createContext(false);
+// The running file's name, so Photo finds that miniapp's images.
+const ScriptFileContext = createContext('');
 const useTokens = () => useContext(TokensContext) as ThemeTokens;
 
 const CLASS_COLORS = new Set<string>(['red', 'orange', 'yellow', 'green', 'teal', 'blue', 'indigo', 'purple', 'pink', 'brown']);
@@ -211,7 +214,7 @@ function Stepper({ label, value, min, max, step, onChange, ...rest }: ViewProps 
 const KEYBOARDS = { text: 'default', number: 'numeric', decimal: 'decimal-pad', email: 'email-address', url: 'url', phone: 'phone-pad' } as const;
 
 /** Controlled like a React input: `value` and `onChange`. */
-function TextField({ value, onChange, onSubmit: submit, placeholder, multiline, keyboard, autocorrect = true, ...rest }: ViewProps & { value?: string; onChange?: (text: string) => void; onSubmit?: () => void; placeholder?: string; multiline?: boolean; keyboard?: keyof typeof KEYBOARDS; autocorrect?: boolean }) {
+function TextField({ value, onChange, onSubmit: submit, placeholder, multiline, lines, plain, keyboard, autocorrect = true, ...rest }: ViewProps & { value?: string; onChange?: (text: string) => void; onSubmit?: () => void; placeholder?: string; multiline?: boolean; lines?: number; plain?: boolean; keyboard?: keyof typeof KEYBOARDS; autocorrect?: boolean }) {
   const tokens = useTokens();
   const inList = useContext(InListContext);
   const text = useNativeState(value ?? '');
@@ -232,12 +235,13 @@ function TextField({ value, onChange, onSubmit: submit, placeholder, multiline, 
       onChange?.(next);
     }}
     modifiers={[
-      textFieldStyle(inList ? 'automatic' : 'roundedBorder'),
+      textFieldStyle(plain ? 'plain' : inList ? 'automatic' : 'roundedBorder'),
       frame({ maxWidth: Infinity }),
       ...(keyboard && KEYBOARDS[keyboard] ? [keyboardType(KEYBOARDS[keyboard])] : []),
       ...(autocorrect ? [] : [autocorrectionDisabled(), textInputAutocapitalization('never')]),
       ...(submit ? [onSubmit(submit)] : []),
-      ...(multiline ? [lineLimit(3)] : []),
+      // A multiline field shows 3 lines unless `lines` says otherwise; 0 lets it grow freely.
+      ...(multiline && (lines ?? 3) > 0 ? [lineLimit(lines ?? 3)] : []),
       ...common(rest, tokens),
     ]}
   />;
@@ -259,6 +263,22 @@ function Progress({ value, color, ...rest }: ViewProps & { value?: number; color
   return <ProgressView value={typeof value === 'number' ? Math.max(0, Math.min(1, value)) : undefined} modifiers={[tint(resolveColor(color, tokens) ?? tokens.blue), ...common(rest, tokens)]} />;
 }
 
+/** An image the miniapp saved with pickImages() or takePhoto(), by its id. `thumb` uses the small copy. */
+function Photo({ id, thumb, mode = 'fill', aspect, width, height, maxWidth, maxHeight, fill, radius, ...rest }: ViewProps & { id?: string; thumb?: boolean; mode?: 'fill' | 'fit'; aspect?: number }) {
+  const tokens = useTokens();
+  const src = scriptImageUri(useContext(ScriptFileContext), String(id ?? ''), thumb);
+  if (!src) return null;
+  const size = { width, height, maxWidth: fill ? Infinity : maxWidth, maxHeight };
+  return <NativeImage uiImage={src} modifiers={[
+    Modifiers.resizable(),
+    Modifiers.aspectRatio({ ratio: aspect, contentMode: mode }),
+    ...(Object.values(size).some((value) => value !== undefined) ? [frame(size)] : []),
+    Modifiers.clipped(),
+    ...(radius ? [clipShape('roundedRectangle', radius)] : []),
+    ...common(rest, tokens),
+  ]} />;
+}
+
 function Empty({ title, icon, detail }: { title: string; icon?: string; detail?: string }) {
   return <ContentUnavailableView title={title} systemImage={icon as SFSymbol | undefined} description={detail} modifiers={[frame({ maxWidth: Infinity })]} />;
 }
@@ -268,7 +288,7 @@ function useTheme() {
   return useMemo(() => ({ mode: tokens.mode, accent: tokens.blue, text: tokens.text, secondary: tokens.secondary, background: tokens.background, surface: tokens.surface, danger: tokens.danger, color: (name: string) => resolveColor(name, tokens) }), [tokens]);
 }
 
-const COMPONENTS = { Text, VStack, HStack, ZStack, Spacer, Divider, Page, List, Section, Card, Heading, Row, Button, IconButton, Image, Toggle, Slider, Stepper, TextField, Picker, Progress, Empty };
+const COMPONENTS = { Text, VStack, HStack, ZStack, Spacer, Divider, Page, List, Section, Card, Heading, Row, Button, IconButton, Image, Photo, Toggle, Slider, Stepper, TextField, Picker, Progress, Empty };
 const TEXT_TYPES = new Set<unknown>([Text, SwiftUI.Text]);
 
 // Raw SwiftUI for anything the views above do not cover. Colour modifiers are
@@ -390,11 +410,33 @@ function createRuntime(fileName: string, data: Record<string, unknown>, report: 
     { text: 'Aceptar', onPress: (value?: string) => resolve(value ?? '') },
   ], 'plain-text', initial));
 
+  // Photos are copied into the miniapp's own folder at once, so they survive
+  // the photo being deleted from the library.
+  const pickImages = async (options: { multiple?: boolean; limit?: number } = {}) => {
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: options.multiple === true, selectionLimit: options.multiple ? Math.max(1, options.limit ?? 10) : 1, quality: 1 });
+    if (result.canceled || disposed) return [];
+    const saved = [];
+    for (const asset of result.assets) saved.push(await saveScriptImage(fileName, asset));
+    return saved;
+  };
+  const takePhoto = async () => {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Sin acceso a la cámara', 'Actívalo en Ajustes de iOS.');
+      return null;
+    }
+    const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 1 });
+    if (result.canceled || disposed) return null;
+    return saveScriptImage(fileName, result.assets[0]);
+  };
+
   const scope: Record<string, unknown> = {
     React, Fragment, h,
     useState, useEffect, useMemo, useRef, useCallback, useReducer, useStored, useTheme,
     ...COMPONENTS,
     storage, haptic, alert, confirm, prompt,
+    pickImages, takePhoto,
+    deleteImage: (id: string) => deleteScriptImage(fileName, String(id)),
     close: () => {
       if (!disposed) close();
     },
@@ -567,11 +609,13 @@ function ScriptNative({ name, tokens, shake, onClose, onEdit }: { name: string; 
     {failure ? <FailureNative failure={failure} tokens={tokens} onEdit={onEdit} onRetry={restart} onClose={onClose} />
       : !loaded ? <NativeVStack modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity })]}><ProgressView /></NativeVStack>
       : <TokensContext.Provider value={tokens}>
-        <ScriptBoundary key={run} onError={report}>
-          <NativeVStack spacing={0} modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity })]}>
-            {React.createElement(loaded.App as React.ComponentType)}
-          </NativeVStack>
-        </ScriptBoundary>
+        <ScriptFileContext.Provider value={name}>
+          <ScriptBoundary key={run} onError={report}>
+            <NativeVStack spacing={0} modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity })]}>
+              {React.createElement(loaded.App as React.ComponentType)}
+            </NativeVStack>
+          </ScriptBoundary>
+        </ScriptFileContext.Provider>
       </TokensContext.Provider>}
     <BottomSheet isPresented={menuOpen} onIsPresentedChange={setMenuOpen} onDismiss={() => setMenuOpen(false)}>
       {menuOpen ? <SwiftUI.Group modifiers={[Modifiers.presentationDetents([{ height: 300 }]), Modifiers.presentationDragIndicator('visible')]}>

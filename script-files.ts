@@ -1,9 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as ImageManipulator from 'expo-image-manipulator';
 import * as Sharing from 'expo-sharing';
 import { useSyncExternalStore } from 'react';
-import { isScriptFile, scriptDataKey, uniqueScriptName } from './script-runtime';
+import { imageSizes, isImageId, isScriptFile, newImageId, scriptDataKey, uniqueScriptName } from './script-runtime';
 
 // The .js miniapps live as plain files in the app's documents folder, under
 // "miniapps". Files come in from the Files app and go out through the share sheet.
@@ -14,6 +15,8 @@ type ScriptsState = { ready: boolean; failed: boolean; files: ScriptFile[] };
 const MAX_BYTES = 512 * 1024;
 const dir = () => `${FileSystem.documentDirectory}miniapps/`;
 const uri = (name: string) => `${dir()}${encodeURIComponent(name)}`;
+// Each miniapp's images live in a hidden folder named after its file.
+const imagesDir = (name: string) => `${dir()}.images/${encodeURIComponent(name)}/`;
 
 let state: ScriptsState = { ready: false, failed: false, files: [] };
 const listeners = new Set<() => void>();
@@ -66,6 +69,10 @@ export async function renameScript(from: string, to: string) {
   // The file system ignores case, so a case-only rename is the same file.
   if (target.exists && from.toLowerCase() !== to.toLowerCase()) throw new Error(`Ya existe "${to}".`);
   await FileSystem.moveAsync({ from: uri(from), to: uri(to) });
+  if ((await FileSystem.getInfoAsync(imagesDir(from))).exists) {
+    await FileSystem.makeDirectoryAsync(`${dir()}.images/`, { intermediates: true });
+    await FileSystem.moveAsync({ from: imagesDir(from), to: imagesDir(to) });
+  }
   const data = await AsyncStorage.getItem(scriptDataKey(from));
   if (data !== null) {
     await AsyncStorage.setItem(scriptDataKey(to), data);
@@ -76,6 +83,7 @@ export async function renameScript(from: string, to: string) {
 
 export async function deleteScript(name: string) {
   await FileSystem.deleteAsync(uri(name), { idempotent: true });
+  await FileSystem.deleteAsync(imagesDir(name), { idempotent: true });
   await AsyncStorage.removeItem(scriptDataKey(name));
   await refreshScripts();
 }
@@ -110,4 +118,29 @@ export async function loadScriptData(name: string) {
 
 export async function saveScriptData(name: string, data: Record<string, unknown>) {
   await AsyncStorage.setItem(scriptDataKey(name), JSON.stringify(data));
+}
+
+export type ScriptImage = { id: string; width: number; height: number };
+
+/** Where a stored image is read from; `thumb` is the small copy for lists. */
+export function scriptImageUri(name: string, id: string, thumb = false) {
+  return isImageId(id) ? `${imagesDir(name)}${id}${thumb ? '.thumb' : ''}.jpg` : null;
+}
+
+/** Keeps a picked or captured photo for a miniapp: a copy up to 1600 px and a 480 px thumbnail, both JPEG. */
+export async function saveScriptImage(name: string, source: { uri: string; width: number; height: number }): Promise<ScriptImage> {
+  const id = newImageId();
+  const sizes = imageSizes(source.width, source.height);
+  await FileSystem.makeDirectoryAsync(imagesDir(name), { intermediates: true });
+  const full = await ImageManipulator.manipulateAsync(source.uri, [{ resize: sizes.full }], { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG });
+  const thumb = await ImageManipulator.manipulateAsync(full.uri, [{ resize: sizes.thumb }], { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG });
+  await FileSystem.moveAsync({ from: full.uri, to: scriptImageUri(name, id)! });
+  await FileSystem.moveAsync({ from: thumb.uri, to: scriptImageUri(name, id, true)! });
+  return { id, width: full.width, height: full.height };
+}
+
+export async function deleteScriptImage(name: string, id: string) {
+  if (!isImageId(id)) return;
+  await FileSystem.deleteAsync(scriptImageUri(name, id)!, { idempotent: true });
+  await FileSystem.deleteAsync(scriptImageUri(name, id, true)!, { idempotent: true });
 }
