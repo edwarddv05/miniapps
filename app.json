@@ -69,7 +69,13 @@
           "faceIDPermission": "La app usa Face ID para desbloquear las miniapps que lo piden."
         }
       ],
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "expo-media-library",
+        {
+          "savePhotosPermission": "La app guarda en Fotos las imágenes y videos que eliges en tus miniapps."
+        }
+      ]
     ]
   }
 }

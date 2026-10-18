@@ -1,8 +1,11 @@
 import { transform } from 'sucrase';
+import { parse } from 'sucrase/dist/parser';
+import { TokenType as tt } from 'sucrase/dist/parser/tokenizer/types';
 
-// Miniapps written as .js files on the phone. Each file is transpiled on the
-// device (JSX and import/export become plain calls), then run with the app's
-// API as its only scope. The UI it returns is drawn by the app's SwiftUI views.
+// Miniapps written as .js, .jsx, .ts or .tsx files on the phone. Each file is
+// transpiled on the device (JSX, types and import/export become plain calls),
+// then run with the app's API as its only scope. The UI it returns is drawn by
+// the app's SwiftUI views.
 
 export type ScriptMeta = { title: string; icon: string; color: string | null; detail: string | null };
 
@@ -15,7 +18,7 @@ export class ScriptError extends Error {
   }
 }
 
-export const SCRIPT_EXTENSIONS = ['.js', '.jsx'];
+export const SCRIPT_EXTENSIONS = ['.js', '.jsx', '.ts', '.tsx'];
 export const SCRIPT_DATA_PREFIX = '@miniapps/script-data/';
 const MAX_NAME = 60;
 
@@ -25,14 +28,24 @@ export function isScriptFile(name: string) {
 }
 
 export function baseName(name: string) {
-  return name.replace(/\.(jsx?)$/i, '');
+  return name.replace(/\.([jt]sx?)$/i, '');
 }
 
-/** A safe file name from what the owner typed: no folders, always .js or .jsx. */
+export function isTypeScriptFile(name: string) {
+  return /\.tsx?$/i.test(name);
+}
+
+// Files whose name starts with "_" are modules: other files import them, and
+// Biblioteca opens them in the editor instead of running them.
+export function isModuleFile(name: string) {
+  return name.startsWith('_');
+}
+
+/** A safe file name from what the owner typed: no folders, always .js, .jsx, .ts or .tsx. */
 export function scriptFileName(input: string) {
   const trimmed = input.trim().replace(/[\\/:*?"<>|\u0000-\u001f]/g, '').replace(/^\.+/, '').trim();
   if (!trimmed) return null;
-  const extension = /\.jsx$/i.test(trimmed) ? '.jsx' : '.js';
+  const extension = (/\.[jt]sx?$/i.exec(trimmed)?.[0] ?? '.js').toLowerCase();
   const base = baseName(trimmed).slice(0, MAX_NAME).trim();
   return base ? `${base}${extension}` : null;
 }
@@ -57,12 +70,16 @@ function errorLine(error: unknown): number | null {
   return match ? Number(match[1]) : null;
 }
 
-/** JSX and modules to plain JavaScript. Line numbers are kept, so errors point at the file. */
-export function compileScript(source: string) {
+/**
+ * JSX, types and modules to plain JavaScript. Line numbers are kept, so errors
+ * point at the file. Loops get a guard that stops one running away (`guard`
+ * is off for downloaded packages).
+ */
+export function compileScript(source: string, options: { typescript?: boolean; guard?: boolean } = {}) {
   let code: string;
   try {
     code = transform(source, {
-      transforms: ['jsx', 'imports'],
+      transforms: options.typescript ? ['jsx', 'imports', 'typescript'] : ['jsx', 'imports'],
       jsxPragma: 'h',
       jsxFragmentPragma: 'Fragment',
       production: true,
@@ -78,7 +95,101 @@ export function compileScript(source: string) {
   } catch (error) {
     throw new ScriptError(error instanceof Error ? error.message.replace(/^\d+:\d+:\s*/, '') : String(error), errorLine(error));
   }
-  return code;
+  if (options.guard === false) return code;
+  try {
+    return guardLoops(code);
+  } catch {
+    // Code the engine accepts but the tokenizer does not runs unguarded.
+    return code;
+  }
+}
+
+// ─── Runaway loops ─────────────────────────────────────────────────────────
+
+export const LOOP_GUARD = '__superappLoop';
+
+/**
+ * Puts a call to the loop guard in the condition of every while, do…while and
+ * three-part for loop, with the loop's line. Nothing is added on new lines, so
+ * line numbers still match the file. for…of and for…in end on their own.
+ */
+export function guardLoops(code: string) {
+  const { tokens } = parse(code, false, false, false);
+  const lineStarts = [0];
+  for (let index = 0; index < code.length; index++) if (code[index] === '\n') lineStarts.push(index + 1);
+  const lineAt = (position: number) => {
+    let low = 0;
+    let high = lineStarts.length - 1;
+    while (low < high) {
+      const middle = (low + high + 1) >> 1;
+      if (lineStarts[middle] <= position) low = middle;
+      else high = middle - 1;
+    }
+    return low + 1;
+  };
+  const opens = new Set([tt.parenL, tt.bracketL, tt.braceL, tt.dollarBraceL]);
+  const closes = new Set([tt.parenR, tt.bracketR, tt.braceR]);
+  const matching = (open: number) => {
+    let depth = 0;
+    for (let index = open; index < tokens.length; index++) {
+      if (opens.has(tokens[index].type)) depth++;
+      else if (closes.has(tokens[index].type) && --depth === 0) return index;
+    }
+    return -1;
+  };
+  const edits: Array<[number, string]> = [];
+  for (let index = 0; index < tokens.length - 1; index++) {
+    const kind = tokens[index].type;
+    if ((kind !== tt._while && kind !== tt._for) || tokens[index + 1].type !== tt.parenL) continue;
+    const end = matching(index + 1);
+    if (end < 0) continue;
+    const call = `${LOOP_GUARD}(${lineAt(tokens[index].start)})`;
+    if (kind === tt._while) {
+      edits.push([tokens[index + 1].end, `${call} && (`], [tokens[end].start, ')']);
+      continue;
+    }
+    const semis: number[] = [];
+    let depth = 0;
+    for (let inner = index + 1; inner <= end; inner++) {
+      const type = tokens[inner].type;
+      if (opens.has(type)) depth++;
+      else if (closes.has(type)) depth--;
+      else if (type === tt.semi && depth === 1) semis.push(inner);
+    }
+    if (semis.length !== 2) continue;
+    const [first, second] = semis;
+    if (second === first + 1) edits.push([tokens[first].end, ` ${call}`]);
+    else edits.push([tokens[first + 1].start, `${call} && (`], [tokens[second].start, ')']);
+  }
+  edits.sort((a, b) => b[0] - a[0]);
+  let result = code;
+  for (const [position, text] of edits) result = result.slice(0, position) + text + result.slice(position);
+  return result;
+}
+
+/**
+ * The guard the compiled loops call. A loop that keeps the app busy longer
+ * than `limitMs` without letting it draw is stopped with an error on its line.
+ * The clock restarts each time the app gets a turn (`defer` runs then).
+ */
+export function createLoopGuard({ limitMs = 3000, now = Date.now, defer = (fn: () => void) => { globalThis.setTimeout(fn, 0); } }: { limitMs?: number; now?: () => number; defer?: (fn: () => void) => void } = {}) {
+  let armed = false;
+  let start = 0;
+  let count = 0;
+  return (line: number) => {
+    if (!armed) {
+      armed = true;
+      start = now();
+      count = 0;
+      defer(() => {
+        armed = false;
+      });
+    }
+    if ((++count & 1023) === 0 && now() - start > limitMs) {
+      throw new ScriptError(`Un bucle siguió más de ${Math.round(limitMs / 1000)} s sin terminar y se detuvo.`, line);
+    }
+    return true;
+  };
 }
 
 // The iOS keyboard turns quotes into curly ones, "--" into a dash and "..."
@@ -88,14 +199,15 @@ export function plainPunctuation(source: string) {
 }
 
 /** Compiles `source`; if only the keyboard's punctuation breaks it, the plain version is returned as `fixed`. */
-export function checkScript(source: string): { code: string; fixed: string | null } {
+export function checkScript(source: string, fileName = ''): { code: string; fixed: string | null } {
+  const options = { typescript: isTypeScriptFile(fileName) };
   try {
-    return { code: compileScript(source), fixed: null };
+    return { code: compileScript(source, options), fixed: null };
   } catch (error) {
     const plain = plainPunctuation(source);
     if (plain === source) throw error;
     try {
-      return { code: compileScript(plain), fixed: plain };
+      return { code: compileScript(plain, options), fixed: plain };
     } catch {
       throw error;
     }
@@ -104,29 +216,102 @@ export function checkScript(source: string): { code: string; fixed: string | nul
 
 export type ScriptModule = { default?: unknown; meta?: unknown; [key: string]: unknown };
 
-/** Runs compiled code with `scope` as its globals. `require` serves only the modules the app offers. */
-export function evaluateScript(code: string, scope: Record<string, unknown>, modules: Record<string, unknown> = {}): ScriptModule {
-  const names = Object.keys(scope);
-  const module = { exports: {} as ScriptModule };
-  const require = (request: string) => {
+/**
+ * Compiled modules a file imports, by id: its code, whether it runs with the
+ * miniapp's scope (the owner's files) or bare (downloaded packages), and the
+ * id each of its import paths points to.
+ */
+export type ModuleTable = Record<string, { code: string; scoped: boolean; requests: Record<string, string> }>;
+
+/**
+ * Runs compiled code with `scope` as its globals. `require` serves the modules
+ * the app offers, then the files and packages in `table` (each run once).
+ */
+export function evaluateScript(code: string, scope: Record<string, unknown>, modules: Record<string, unknown> = {}, table: ModuleTable = {}, requests: Record<string, string> = {}): ScriptModule {
+  const loaded = new Map<string, { exports: ScriptModule }>();
+  const makeRequire = (paths: Record<string, string>) => (request: string) => {
     if (request in modules) return modules[request];
-    throw new ScriptError(`El módulo "${request}" no está disponible.`);
+    const id = paths[request];
+    if (id === undefined || !table[id]) throw new ScriptError(`El módulo "${request}" no está disponible.`);
+    const cached = loaded.get(id);
+    if (cached) return cached.exports;
+    const module = { exports: {} as ScriptModule };
+    // Cached before it runs, so two modules that import each other still load.
+    loaded.set(id, module);
+    run(table[id].code, table[id].scoped ? scope : {}, module, makeRequire(table[id].requests), id);
+    return module.exports;
   };
-  let run: (...args: unknown[]) => void;
+  const main = { exports: {} as ScriptModule };
+  run(code, scope, main, makeRequire(requests), null);
+  return main.exports;
+}
+
+function run(code: string, scope: Record<string, unknown>, module: { exports: ScriptModule }, require: (request: string) => unknown, id: string | null) {
+  const names = Object.keys(scope);
+  const where = (message: string) => (id ? `${id.replace(/^local:/, '')}: ${message}` : message);
+  let body: (...args: unknown[]) => void;
   try {
     // The code runs in an inner function, on the same first line, so its own
     // declarations may reuse a scope name (a local Row) and lines still match.
-    run = new Function(...names, 'exports', 'module', 'require', `(function () {${code}\n})();`) as typeof run;
+    body = new Function(...names, 'exports', 'module', 'require', `(function () {${code}\n})();`) as typeof body;
   } catch (error) {
-    throw new ScriptError(error instanceof Error ? error.message : String(error), errorLine(error));
+    throw new ScriptError(where(error instanceof Error ? error.message : String(error)), id ? null : errorLine(error));
   }
   try {
-    run(...names.map((name) => scope[name]), module.exports, module, require);
+    body(...names.map((name) => scope[name]), module.exports, module, require);
   } catch (error) {
     if (error instanceof ScriptError) throw error;
-    throw new ScriptError(error instanceof Error ? error.message : String(error));
+    throw new ScriptError(where(error instanceof Error ? error.message : String(error)));
   }
-  return module.exports;
+}
+
+// ─── Imports ───────────────────────────────────────────────────────────────
+
+/** Every path the compiled code passes to require(), in order, once each. */
+export function moduleRequests(code: string) {
+  const found = new Set<string>();
+  for (const match of code.matchAll(/\brequire\(\s*(['"])([^'"\n]+)\1\s*\)/g)) found.add(match[2]);
+  return [...found];
+}
+
+/** The owner's file an import like "./_fechas" names, with or without its extension. */
+export function resolveLocalModule(request: string, files: string[]) {
+  if (!request.startsWith('./') || request.slice(2).includes('/')) return null;
+  const wanted = request.slice(2).toLowerCase();
+  return files.find((file) => file.toLowerCase() === wanted) ?? files.find((file) => baseName(file).toLowerCase() === wanted) ?? null;
+}
+
+export const PACKAGE_HOST = 'https://esm.sh';
+
+/**
+ * Where a package or URL import is downloaded from: "dayjs", "npm:dayjs@1.11"
+ * and "dayjs/plugin/utc" come from esm.sh, built for older engines; a path
+ * inside a downloaded file is resolved against that file's URL.
+ */
+export function packageUrl(request: string, base: string | null) {
+  if (/^https:\/\//i.test(request)) return request;
+  if (base && /^https:\/\//i.test(base)) {
+    const origin = /^https:\/\/[^/]+/i.exec(base)![0];
+    if (request.startsWith('/')) return `${origin}${request}`;
+    if (request.startsWith('./') || request.startsWith('../')) {
+      const parts = base.slice(origin.length).split('?')[0].split('/').slice(0, -1);
+      for (const part of request.split('/')) {
+        if (part === '..') parts.pop();
+        else if (part !== '.') parts.push(part);
+      }
+      return `${origin}${parts.join('/')}`;
+    }
+  }
+  const spec = request.replace(/^npm:/, '');
+  if (!/^(@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*(@[\w.^~<>=*-]+)?(\/[\w./-]*)?$/i.test(spec)) return null;
+  return `${PACKAGE_HOST}/${spec}?bundle&target=es2015`;
+}
+
+/** jsDelivr's copy of a package import, tried only when esm.sh fails. Null for paths inside a downloaded file. */
+export function packageFallbackUrl(request: string) {
+  if (/^(https:|\/|\.)/i.test(request)) return null;
+  const spec = request.replace(/^npm:/, '');
+  return packageUrl(spec, null) ? `https://cdn.jsdelivr.net/npm/${spec}/+esm` : null;
 }
 
 export function scriptComponent(exports: ScriptModule) {
@@ -282,6 +467,8 @@ export type ScriptsBackup = {
   files: Array<{ name: string; source: string }>;
   data: Record<string, Record<string, unknown>>;
   media: Record<string, Record<string, string>>;
+  // Videos travel as raw bytes after the JSON, in this order (see BACKUP_MAGIC).
+  videos?: Array<{ name: string; file: string; size: number }>;
 };
 
 /** Checks the miniapps section of a backup; null when absent, throws when malformed. */
@@ -310,7 +497,70 @@ export function parseScriptsBackup(value: unknown): ScriptsBackup | null {
       media[name][file] = base64;
     }
   }
-  return { files, data, media };
+  if (section.videos === undefined) return { files, data, media };
+  if (!Array.isArray(section.videos)) throw bad();
+  const videos = section.videos.map((video) => {
+    if (!names.has(video?.name) || !isMediaId(video?.file) || !video.file.startsWith('vid-') || !Number.isSafeInteger(video?.size) || video.size < 0) throw bad();
+    return { name: video.name, file: video.file, size: video.size };
+  });
+  return { files, data, media, videos };
+}
+
+// ─── Backup file with videos ───────────────────────────────────────────────
+
+/**
+ * A backup with videos is not plain JSON: it starts with this line, then the
+ * JSON's length in bytes on its own line, the JSON, and each video's bytes
+ * one after another. Without videos a backup stays a plain .json file.
+ */
+export const BACKUP_MAGIC = 'MYSUPERAPP-BACKUP';
+
+export function backupHeader(jsonBytes: number) {
+  return `${BACKUP_MAGIC}\n${jsonBytes}\n`;
+}
+
+/** Where the JSON sits in a backup file, from its first bytes; null for a plain JSON backup. */
+export function readBackupHeader(start: Uint8Array) {
+  let text = '';
+  for (let index = 0; index < start.length && index < 64; index++) text += String.fromCharCode(start[index]);
+  if (!text.startsWith(`${BACKUP_MAGIC}\n`)) return null;
+  const match = /^[^\n]+\n(\d+)\n/.exec(text);
+  if (!match) throw new Error('El respaldo está dañado.');
+  return { jsonStart: match[0].length, jsonLength: Number(match[1]) };
+}
+
+/** UTF-8 bytes of a string, without relying on TextEncoder. */
+export function utf8Encode(text: string) {
+  const bytes: number[] = [];
+  for (let index = 0; index < text.length; index++) {
+    let code = text.charCodeAt(index);
+    if (code >= 0xd800 && code < 0xdc00 && index + 1 < text.length) {
+      const low = text.charCodeAt(index + 1);
+      if (low >= 0xdc00 && low < 0xe000) {
+        code = 0x10000 + ((code - 0xd800) << 10) + (low - 0xdc00);
+        index++;
+      }
+    }
+    if (code < 0x80) bytes.push(code);
+    else if (code < 0x800) bytes.push(0xc0 | (code >> 6), 0x80 | (code & 63));
+    else if (code < 0x10000) bytes.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 63), 0x80 | (code & 63));
+    else bytes.push(0xf0 | (code >> 18), 0x80 | ((code >> 12) & 63), 0x80 | ((code >> 6) & 63), 0x80 | (code & 63));
+  }
+  return Uint8Array.from(bytes);
+}
+
+export function utf8Decode(bytes: Uint8Array) {
+  let text = '';
+  for (let index = 0; index < bytes.length;) {
+    const byte = bytes[index++];
+    let code: number;
+    if (byte < 0x80) code = byte;
+    else if (byte >= 0xf0) code = ((byte & 7) << 18) | ((bytes[index++] & 63) << 12) | ((bytes[index++] & 63) << 6) | (bytes[index++] & 63);
+    else if (byte >= 0xe0) code = ((byte & 15) << 12) | ((bytes[index++] & 63) << 6) | (bytes[index++] & 63);
+    else code = ((byte & 31) << 6) | (bytes[index++] & 63);
+    text += String.fromCodePoint(code);
+  }
+  return text;
 }
 
 // ─── Notifications ─────────────────────────────────────────────────────────
@@ -410,4 +660,17 @@ export function distanceMeters(a: Point, b: Point) {
   const dLon = (b.longitude - a.longitude) * rad;
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.latitude * rad) * Math.cos(b.latitude * rad) * Math.sin(dLon / 2) ** 2;
   return 2 * 6371000 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+// ─── Drawing ───────────────────────────────────────────────────────────────
+
+/** One line drawn by hand: its colour, width in points and the points it passed. */
+export type Stroke = { color: string; width: number; points: Array<[number, number]> };
+
+/** The SVG path of a stroke. A single point becomes a dot. */
+export function strokePath(points: Array<[number, number]>) {
+  if (!points.length) return '';
+  const [first, ...rest] = points;
+  if (!rest.length) return `M${first[0]} ${first[1]}l0.01 0`;
+  return `M${first[0]} ${first[1]}${rest.map(([x, y]) => `L${x} ${y}`).join('')}`;
 }

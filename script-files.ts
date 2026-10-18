@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
+import { File, FileMode } from 'expo-file-system';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as Sharing from 'expo-sharing';
@@ -28,6 +29,12 @@ const publish = (next: ScriptsState) => {
 async function ensureDir() {
   const info = await FileSystem.getInfoAsync(dir());
   if (!info.exists) await FileSystem.makeDirectoryAsync(dir(), { intermediates: true });
+}
+
+/** The file names in the miniapps folder, read now. */
+export async function listScriptNames() {
+  await ensureDir();
+  return (await FileSystem.readDirectoryAsync(dir())).filter(isScriptFile);
 }
 
 export async function refreshScripts() {
@@ -232,8 +239,8 @@ export { extensionOf };
 
 /**
  * The miniapps for the app's backup: every file, its stored values, and its
- * images and recordings as base64. Videos are left out; they are too large
- * for a backup file.
+ * images, recordings and files as base64. Videos are only listed here; their
+ * bytes are copied straight into the backup file (see writeScriptVideos).
  */
 export async function collectScriptsBackup(): Promise<ScriptsBackup> {
   const backup: ScriptsBackup = { files: [], data: {}, media: {} };
@@ -246,7 +253,12 @@ export async function collectScriptsBackup(): Promise<ScriptsBackup> {
     if (!(await FileSystem.getInfoAsync(mediaDir(name))).exists) continue;
     const media: Record<string, string> = {};
     for (const file of await FileSystem.readDirectoryAsync(mediaDir(name))) {
-      const keep = isImageId(file.replace(/(\.thumb)?\.jpg$/, '')) || (isMediaId(file) && !file.startsWith('vid-'));
+      if (isMediaId(file) && file.startsWith('vid-')) {
+        const info = await FileSystem.getInfoAsync(`${mediaDir(name)}${file}`);
+        if (info.exists && !info.isDirectory) (backup.videos ??= []).push({ name, file, size: info.size });
+        continue;
+      }
+      const keep = isImageId(file.replace(/(\.thumb)?\.jpg$/, '')) || isMediaId(file);
       if (keep) media[file] = await FileSystem.readAsStringAsync(`${mediaDir(name)}${file}`, { encoding: FileSystem.EncodingType.Base64 });
     }
     if (Object.keys(media).length) backup.media[name] = media;
@@ -254,8 +266,38 @@ export async function collectScriptsBackup(): Promise<ScriptsBackup> {
   return backup;
 }
 
-/** Puts back the miniapps of a backup. Files with the same name are replaced; other miniapps stay. */
-export async function restoreScriptsBackup(backup: ScriptsBackup) {
+const CHUNK = 4 * 1024 * 1024;
+
+/** Copies `size` bytes from one open file to another in 4 MB pieces, letting the app draw between them. */
+async function copyBytes(from: ReturnType<File['open']>, to: ReturnType<File['open']>, size: number) {
+  let left = size;
+  while (left > 0) {
+    const chunk = from.readBytes(Math.min(CHUNK, left));
+    if (!chunk.length) throw new Error('El respaldo está incompleto.');
+    to.writeBytes(chunk);
+    left -= chunk.length;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+/** Appends each listed video's bytes to an open backup file, in the listed order. */
+export async function writeScriptVideos(out: ReturnType<File['open']>, videos: NonNullable<ScriptsBackup['videos']>) {
+  for (const video of videos) {
+    const input = new File(`${mediaDir(video.name)}${video.file}`).open(FileMode.ReadOnly);
+    try {
+      await copyBytes(input, out, video.size);
+    } finally {
+      input.close();
+    }
+  }
+}
+
+/**
+ * Puts back the miniapps of a backup. Files with the same name are replaced;
+ * other miniapps stay. `videos` says where the videos' bytes start in the
+ * backup file, when it has them.
+ */
+export async function restoreScriptsBackup(backup: ScriptsBackup, videos?: { uri: string; offset: number }) {
   await ensureDir();
   for (const file of backup.files) {
     await FileSystem.writeAsStringAsync(uri(file.name), file.source);
@@ -267,6 +309,25 @@ export async function restoreScriptsBackup(backup: ScriptsBackup) {
     await FileSystem.makeDirectoryAsync(mediaDir(file.name), { intermediates: true });
     for (const [item, base64] of Object.entries(media)) {
       await FileSystem.writeAsStringAsync(`${mediaDir(file.name)}${item}`, base64, { encoding: FileSystem.EncodingType.Base64 });
+    }
+  }
+  if (videos && backup.videos?.length) {
+    const input = new File(videos.uri).open(FileMode.ReadOnly);
+    try {
+      input.offset = videos.offset;
+      for (const video of backup.videos) {
+        await FileSystem.makeDirectoryAsync(mediaDir(video.name), { intermediates: true });
+        const target = new File(`${mediaDir(video.name)}${video.file}`);
+        target.create({ overwrite: true });
+        const out = target.open(FileMode.ReadWrite);
+        try {
+          await copyBytes(input, out, video.size);
+        } finally {
+          out.close();
+        }
+      }
+    } finally {
+      input.close();
     }
   }
   await refreshScripts();

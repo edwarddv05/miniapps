@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { createLoader } = require('./load-ts.cjs');
 
-const runtime = createLoader({ sucrase: require('sucrase') })('script-runtime');
+const runtime = createLoader({ sucrase: require('sucrase'), 'sucrase/dist/parser': require('sucrase/dist/parser'), 'sucrase/dist/parser/tokenizer/types': require('sucrase/dist/parser/tokenizer/types') })('script-runtime');
 
 // JSX becomes plain objects, so a file's output can be compared without React.
 const h = (type, props, ...children) => ({ type, props: props ?? {}, children });
@@ -162,4 +162,95 @@ test('distances follow the Earth surface', () => {
   const meters = runtime.distanceMeters(lima, callao);
   assert.ok(meters > 8000 && meters < 8400, String(meters));
   assert.equal(runtime.distanceMeters(lima, lima), 0);
+});
+
+test('loops get a guard on their own line, outside strings and regexes', () => {
+  const code = runtime.compileScript('let i = 0;\nwhile (i < 3) i++;\nfor (let j = 0; j < 2; j++) { for (;;) break; }\ndo { i-- } while (i > 0)\nfor (const x of [1]) {}\nconst s = `for (;;) ${i}`;\nconst re = /while (x)/;');
+  assert.match(code, /while \(__superappLoop\(2\) && \(i < 3\)\)/);
+  assert.match(code, /for \(let j = 0; __superappLoop\(3\) && \(j < 2\); j\+\+\)/);
+  assert.match(code, /for \(; __superappLoop\(3\);\)/);
+  assert.match(code, /while \(__superappLoop\(4\) && \(i > 0\)\)/);
+  assert.match(code, /for \(const x of \[1\]\)/);
+  assert.match(code, /`for \(;;\) \$\{i\}`/);
+  assert.match(code, /\/while \(x\)\//);
+  assert.equal(code.split('\n').length, 7);
+});
+
+test('a runaway loop is stopped with its line, and the clock restarts on the next turn', () => {
+  let clock = 0;
+  let turn = null;
+  const guard = runtime.createLoopGuard({ limitMs: 3000, now: () => clock, defer: (fn) => { turn = fn; } });
+  const run = () => {
+    for (let index = 0; index < 1024 * 5; index++) {
+      clock += 1;
+      guard(12);
+    }
+  };
+  assert.throws(run, (error) => error.line === 12 && /3 s/.test(error.message));
+  turn();
+  clock = 0;
+  const quick = runtime.createLoopGuard({ limitMs: 3000, now: () => 0, defer: () => {} });
+  for (let index = 0; index < 50000; index++) quick(1);
+  assert.equal(runtime.evaluateScript(runtime.compileScript('let n = 0; while (n < 5000) n++; export const total = n;'), { __superappLoop: quick }).total, 5000);
+});
+
+test('TypeScript files compile with their types removed', () => {
+  const exports = runtime.evaluateScript(runtime.checkScript('type Item = { id: number };\nconst items: Item[] = [{ id: 2 }];\nexport const total = items.reduce((sum: number, item) => sum + item.id, 0);', 'Gastos.tsx').code, {});
+  assert.equal(exports.total, 2);
+  assert.equal(runtime.isTypeScriptFile('Gastos.ts'), true);
+  assert.equal(runtime.scriptFileName('Gastos.TSX'), 'Gastos.tsx');
+  assert.equal(runtime.baseName('Gastos.ts'), 'Gastos');
+  assert.equal(runtime.isScriptFile('a.tsx'), true);
+});
+
+test('imports of other files and packages run once, in the miniapp scope or bare', () => {
+  const table = {
+    'local:_fechas.js': { code: runtime.compileScript("export const hoy = () => saludo + ' ' + require('./_x').x;"), scoped: true, requests: { './_x': 'local:_x.js' } },
+    'local:_x.js': { code: runtime.compileScript('export const x = typeof saludo;'), scoped: false, requests: {} },
+  };
+  const main = runtime.compileScript("import { hoy } from './_fechas';\nimport { hoy as otra } from './_fechas';\nexport const text = hoy();\nexport const same = hoy === otra;");
+  assert.deepEqual(runtime.moduleRequests(main), ['./_fechas']);
+  const exports = runtime.evaluateScript(main, { saludo: 'hola' }, {}, table, { './_fechas': 'local:_fechas.js' });
+  assert.equal(exports.text, 'hola undefined');
+  assert.equal(exports.same, true);
+  assert.throws(() => runtime.evaluateScript(runtime.compileScript("import x from './_nada';"), {}), /no está disponible/);
+});
+
+test('import paths resolve to files and package URLs', () => {
+  const files = ['_fechas.js', 'Notas.jsx', '_util.ts'];
+  assert.equal(runtime.resolveLocalModule('./_fechas', files), '_fechas.js');
+  assert.equal(runtime.resolveLocalModule('./_util.ts', files), '_util.ts');
+  assert.equal(runtime.resolveLocalModule('../_fechas', files), null);
+  assert.equal(runtime.resolveLocalModule('./sub/_fechas', files), null);
+  assert.equal(runtime.packageUrl('dayjs', null), 'https://esm.sh/dayjs?bundle&target=es2015');
+  assert.equal(runtime.packageUrl('npm:dayjs@1.11/plugin/utc', null), 'https://esm.sh/dayjs@1.11/plugin/utc?bundle&target=es2015');
+  assert.equal(runtime.packageUrl('/dayjs@1.11.23/es2015/dayjs.mjs', 'https://esm.sh/dayjs?bundle'), 'https://esm.sh/dayjs@1.11.23/es2015/dayjs.mjs');
+  assert.equal(runtime.packageUrl('./b.mjs', 'https://cdn.jsdelivr.net/npm/x@1/dist/a.mjs'), 'https://cdn.jsdelivr.net/npm/x@1/dist/b.mjs');
+  assert.equal(runtime.packageUrl('../c.mjs', 'https://cdn.jsdelivr.net/npm/x@1/dist/a.mjs'), 'https://cdn.jsdelivr.net/npm/x@1/c.mjs');
+  assert.equal(runtime.packageUrl('no válido!', null), null);
+  assert.equal(runtime.packageFallbackUrl('marked'), 'https://cdn.jsdelivr.net/npm/marked/+esm');
+  assert.equal(runtime.packageFallbackUrl('/marked@1/x.mjs'), null);
+  assert.equal(runtime.isModuleFile('_fechas.js'), true);
+  assert.equal(runtime.isModuleFile('Notas.jsx'), false);
+});
+
+test('strokes become SVG paths', () => {
+  assert.equal(runtime.strokePath([]), '');
+  assert.equal(runtime.strokePath([[1, 2]]), 'M1 2l0.01 0');
+  assert.equal(runtime.strokePath([[1, 2], [3, 4.5]]), 'M1 2L3 4.5');
+});
+
+test('backup files with videos carry their JSON behind a header', () => {
+  const text = 'Año 🎬 ñ';
+  const bytes = runtime.utf8Encode(text);
+  assert.deepEqual([...bytes], [...Buffer.from(text, 'utf8')]);
+  assert.equal(runtime.utf8Decode(bytes), text);
+  const header = runtime.utf8Encode(runtime.backupHeader(1234) + '{');
+  assert.deepEqual(runtime.readBackupHeader(header), { jsonStart: header.length - 1, jsonLength: 1234 });
+  assert.equal(runtime.readBackupHeader(runtime.utf8Encode('{"format":1}')), null);
+  assert.throws(() => runtime.readBackupHeader(runtime.utf8Encode('MYSUPERAPP-BACKUP\nxx\n')), /dañado/);
+  const good = { files: [{ name: 'Cine.js', source: '' }], data: {}, media: {}, videos: [{ name: 'Cine.js', file: 'vid-a-000001.mov', size: 10 }] };
+  assert.deepEqual(runtime.parseScriptsBackup(good).videos, good.videos);
+  assert.throws(() => runtime.parseScriptsBackup({ ...good, videos: [{ name: 'Cine.js', file: 'aud-a-000001.m4a', size: 1 }] }), /no son válidas/);
+  assert.throws(() => runtime.parseScriptsBackup({ ...good, videos: [{ name: 'Otra.js', file: 'vid-a-000001.mov', size: 1 }] }), /no son válidas/);
 });

@@ -1,7 +1,7 @@
 // What every miniapp view shares: the app's theme, the running file's name and
 // the props all views take (padding, frame, background…).
 
-import { clipShape, disabled, frame, onTapGesture, opacity, padding, type ViewModifier } from '@expo/ui/swift-ui/modifiers';
+import { Animation, animation, clipShape, disabled, frame, offset, onLongPressGesture, onTapGesture, opacity, padding, rotationEffect, scaleEffect, type ViewModifier } from '@expo/ui/swift-ui/modifiers';
 import { createContext, useContext } from 'react';
 import type { ColorValue } from 'react-native';
 import { background } from '../native-colors';
@@ -47,8 +47,43 @@ export type ViewProps = {
   opacity?: number;
   disabled?: boolean;
   onTap?: () => void;
+  onLongPress?: () => void;
+  /** Moves the view by this many points without changing the layout. */
+  x?: number;
+  y?: number;
+  scale?: number;
+  /** Degrees, clockwise. */
+  rotation?: number;
+  /** Animates the changes above whenever `animateOn` changes. */
+  animation?: AnimationKind | { type: AnimationKind; duration?: number };
+  animateOn?: unknown;
   modifiers?: ViewModifier[];
 };
+
+type AnimationKind = 'default' | 'spring' | 'bouncy' | 'easeInOut' | 'easeIn' | 'easeOut' | 'linear';
+
+function animationFor(value: ViewProps['animation']) {
+  const kind = typeof value === 'object' && value ? value.type : value ?? 'default';
+  const duration = typeof value === 'object' && value ? value.duration : undefined;
+  if (kind === 'spring') return Animation.spring();
+  if (kind === 'bouncy') return Animation.spring({ response: 0.45, dampingFraction: 0.55 });
+  if (kind === 'easeIn' || kind === 'easeOut' || kind === 'easeInOut' || kind === 'linear') return Animation[kind]({ duration });
+  return Animation.default;
+}
+
+// SwiftUI animates on a number or a boolean; anything else is reduced to a number that changes with it.
+function animatedValue(value: unknown): number | boolean {
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  let text: string;
+  try {
+    text = typeof value === 'string' ? value : JSON.stringify(value) ?? String(value);
+  } catch {
+    text = String(value);
+  }
+  let hash = 0;
+  for (let index = 0; index < text.length; index++) hash = (hash * 31 + text.charCodeAt(index)) | 0;
+  return hash;
+}
 
 export function common(props: ViewProps, tokens: ThemeTokens): ViewModifier[] {
   const result: ViewModifier[] = [];
@@ -61,7 +96,12 @@ export function common(props: ViewProps, tokens: ThemeTokens): ViewModifier[] {
   if (props.radius !== undefined) result.push(clipShape('roundedRectangle', props.radius));
   if (props.opacity !== undefined) result.push(opacity(props.opacity));
   if (props.disabled) result.push(disabled(true));
+  if (props.x !== undefined || props.y !== undefined) result.push(offset({ x: props.x ?? 0, y: props.y ?? 0 }));
+  if (props.scale !== undefined) result.push(scaleEffect(props.scale));
+  if (props.rotation !== undefined) result.push(rotationEffect(props.rotation));
   if (props.onTap) result.push(onTapGesture(props.onTap));
+  if (props.onLongPress) result.push(onLongPressGesture(props.onLongPress));
+  if (props.animateOn !== undefined) result.push(animation(animationFor(props.animation), animatedValue(props.animateOn)));
   return [...result, ...(Array.isArray(props.modifiers) ? props.modifiers : [])];
 }
 

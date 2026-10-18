@@ -8,7 +8,7 @@ import { Accelerometer } from 'expo-sensors';
 import { Host } from '@expo/ui';
 import * as SwiftUI from '@expo/ui/swift-ui';
 import * as Modifiers from '@expo/ui/swift-ui/modifiers';
-import { BottomSheet, Button as NativeButton, ContentUnavailableView, ContextMenu, Divider as NativeDivider, Form, HStack as NativeHStack, Image as NativeImage, Menu, Picker as NativePicker, ProgressView, ScrollView, Section as NativeSection, Slider as NativeSlider, Spacer as NativeSpacer, Stepper as NativeStepper, Text as NativeText, TextField as NativeTextField, Toggle as NativeToggle, VStack as NativeVStack, ZStack as NativeZStack, useNativeState } from '@expo/ui/swift-ui';
+import { BottomSheet, RNHostView, Button as NativeButton, ContentUnavailableView, ContextMenu, Divider as NativeDivider, Form, HStack as NativeHStack, Image as NativeImage, Menu, Picker as NativePicker, ProgressView, ScrollView, Section as NativeSection, Slider as NativeSlider, Spacer as NativeSpacer, Stepper as NativeStepper, Text as NativeText, TextField as NativeTextField, Toggle as NativeToggle, VStack as NativeVStack, ZStack as NativeZStack, useNativeState } from '@expo/ui/swift-ui';
 import { accessibilityLabel, autocorrectionDisabled, buttonStyle, clipShape, controlSize, disabled, font, frame, glassEffect, keyboardType, lineLimit, menuIndicator, multilineTextAlignment, onSubmit, onTapGesture, opacity, padding, pickerStyle, scrollDismissesKeyboard, tag, textFieldStyle, textInputAutocapitalization, textSelection, type ViewModifier } from '@expo/ui/swift-ui/modifiers';
 import type { SFSymbol } from 'sf-symbols-typescript';
 import React, { Component, Fragment, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
@@ -18,9 +18,12 @@ import { UI } from '../ui-structure';
 import { InListContext, ScriptFileContext, TokensContext, common, resolveColor, useTokens, type FrameAlignment, type ScriptLaunch, type ViewProps } from './script-context';
 import { createShakeDetector } from '../shake-detector';
 import type { ScheduleColor } from '../schedule-data';
-import { NEW_SCRIPT, ScriptError, baseName, checkScript, evaluateScript, formatLog, readMeta, scriptComponent, scriptFileName, staticMeta, type ScriptMeta } from '../script-runtime';
+import { LOOP_GUARD, NEW_SCRIPT, ScriptError, baseName, checkScript, createLoopGuard, evaluateScript, formatLog, isModuleFile, readMeta, scriptComponent, scriptFileName, staticMeta, type ScriptMeta } from '../script-runtime';
+import { loadModules } from '../script-modules';
 import { deleteScript, deleteScriptMedia, importScripts, loadScriptData, readScript, refreshScripts, renameScript, saveScriptImage, saveScriptValues, scriptImageUri, shareScript, useScripts, writeScript, type ScriptFile } from '../script-files';
 import { DEVICE_COMPONENTS, DEVICE_HOOKS, createDeviceApi } from './script-device';
+import { CodeEditorRN, type CodeEditorHandle } from './code-editor';
+import { SCRIPT_VIEWS, SVG_TEXT_TYPES, useNavigation } from './script-views';
 import { CIRCLE_CONTROL_SIZE, MiniappRowNative, NativeCircleButton, PageNative, SectionHeadingNative, SymbolImage, colorForKey, nativeGlassAvailable, textModifiers, usePageWidth, withAlpha, type ThemeTokens } from './shared';
 
 // ---------------------------------------------------------------------------
@@ -233,8 +236,9 @@ function useTheme() {
   return useMemo(() => ({ mode: tokens.mode, accent: tokens.blue, text: tokens.text, secondary: tokens.secondary, background: tokens.background, surface: tokens.surface, danger: tokens.danger, color: (name: string) => resolveColor(name, tokens) }), [tokens]);
 }
 
-const COMPONENTS = { Text, VStack, HStack, ZStack, Spacer, Divider, Page, List, Section, Card, Heading, Row, Button, IconButton, Image, Photo, Toggle, Slider, Stepper, TextField, Picker, Progress, Empty, ...DEVICE_COMPONENTS };
-const TEXT_TYPES = new Set<unknown>([Text, SwiftUI.Text]);
+const COMPONENTS = { Text, VStack, HStack, ZStack, Spacer, Divider, Page, List, Section, Card, Heading, Row, Button, IconButton, Image, Photo, Toggle, Slider, Stepper, TextField, Picker, Progress, Empty, ...DEVICE_COMPONENTS, ...SCRIPT_VIEWS };
+// Views whose children are text, which h() leaves as strings.
+const TEXT_TYPES = new Set<unknown>([Text, SwiftUI.Text, ...SVG_TEXT_TYPES]);
 
 // Raw SwiftUI for anything the views above do not cover. Colour modifiers are
 // the app's versions, which older Expo Go builds also understand.
@@ -435,6 +439,7 @@ function createRuntime(fileName: string, data: Record<string, unknown>, report: 
     React, Fragment, h,
     useState, useEffect, useMemo, useRef, useCallback, useReducer, useStored, useTheme,
     ...DEVICE_HOOKS,
+    useNavigation,
     ...COMPONENTS,
     storage, haptic, alert, confirm, prompt, console,
     launch: Object.freeze({ ...launch }),
@@ -453,6 +458,7 @@ function createRuntime(fileName: string, data: Record<string, unknown>, report: 
     clearInterval: stopTimer,
     SwiftUI,
     modifiers: RAW_MODIFIERS,
+    [LOOP_GUARD]: createLoopGuard(),
   };
   const modules = { superapp: scope, react: React, '@expo/ui/swift-ui': SwiftUI, '@expo/ui/swift-ui/modifiers': RAW_MODIFIERS };
 
@@ -643,9 +649,11 @@ function ScriptNative({ name, tokens, shake, launch, onClose, onEdit }: { name: 
       try {
         const [source, data] = await Promise.all([readScript(name), loadScriptData(name)]);
         if (cancelled) return;
-        const { code } = checkScript(source);
+        const { code } = checkScript(source, name);
+        const imports = await loadModules(code);
+        if (cancelled) return;
         runtime = createRuntime(name, data, report, () => closeRef.current(), logs, launchRef.current);
-        const exports = evaluateScript(code, runtime.scope, runtime.modules);
+        const exports = evaluateScript(code, runtime.scope, runtime.modules, imports.table, imports.requests);
         if (cancelled) return;
         setLoaded({ App: scriptComponent(exports), meta: readMeta(exports, name), runtime });
       } catch (error) {
@@ -703,12 +711,15 @@ export function ScriptRunnerNative({ name, visible, shake, tokens, launch = LIBR
 // ---------------------------------------------------------------------------
 // Editor
 
-/** Edits a file, or writes a new one when `name` is null. Saving checks the code and keeps any error on screen. */
+/**
+ * Edits a file, or writes a new one when `name` is null. The code sits in a
+ * code editor (line numbers, colours, suggestions) edge to edge under the file
+ * name. Saving checks the code and marks the line of any error.
+ */
 export function ScriptEditorNative({ name, tokens, onClose, onSaved }: { name: string | null; tokens: ThemeTokens; onClose: () => void; onSaved: (name: string) => void }) {
   const files = useScripts().files;
-  const width = usePageWidth();
   const nameState = useNativeState(name ? baseName(name) : '');
-  const sourceState = useNativeState('');
+  const editor = useRef<CodeEditorHandle>(null);
   const [nameDraft, setNameDraft] = useState(name ? baseName(name) : '');
   const [source, setSource] = useState<string | null>(name ? null : NEW_SCRIPT);
   const [saved, setSaved] = useState({ name: name ? baseName(name) : '', source: name ? '' : NEW_SCRIPT });
@@ -716,27 +727,27 @@ export function ScriptEditorNative({ name, tokens, onClose, onSaved }: { name: s
   const [loadError, setLoadError] = useState<string | null>(null);
   const [issue, setIssue] = useState<Failure | null>(null);
   const [saving, setSaving] = useState(false);
+  // The text the editor starts with; later edits stay in the editor itself.
+  const [initial, setInitial] = useState<string | null>(name ? null : NEW_SCRIPT);
 
   const load = useCallback(() => {
-    if (!name) {
-      sourceState.set(NEW_SCRIPT);
-      return;
-    }
+    if (!name) return;
     setLoadError(null);
     readScript(name).then((text) => {
-      sourceState.set(text);
+      setInitial(text);
       setSource(text);
       setSaved({ name: baseName(name), source: text });
     }, () => setLoadError(`No se pudo abrir "${name}".`));
-  }, [name, sourceState]);
+  }, [name]);
   useEffect(load, [load]);
 
   const dirty = source !== null && (source !== saved.source || nameDraft.trim() !== saved.name);
+  const extension = (current && /\.[jt]sx?$/i.exec(current)?.[0]) || '.js';
+  const typing = /\.[jt]sx?$/i.exec(nameDraft.trim())?.[0] ?? extension;
 
   const save = async () => {
-    if (source === null || saving) return;
-    const extension = current && /\.jsx$/i.test(current) ? '.jsx' : '.js';
-    const fileName = scriptFileName(/\.jsx?$/i.test(nameDraft.trim()) ? nameDraft : `${nameDraft}${extension}`);
+    if (source === null || saving || !editor.current) return;
+    const fileName = scriptFileName(/\.[jt]sx?$/i.test(nameDraft.trim()) ? nameDraft : `${nameDraft}${extension}`);
     if (!fileName) {
       setIssue({ message: 'Escribe un nombre.', line: null });
       return;
@@ -746,19 +757,18 @@ export function ScriptEditorNative({ name, tokens, onClose, onSaved }: { name: s
       setIssue({ message: `Ya existe "${fileName}".`, line: null });
       return;
     }
-    let text = source;
+    setSaving(true);
+    let text = await editor.current.getText();
     let problem: Failure | null = null;
     try {
-      const checked = checkScript(source);
+      const checked = checkScript(text, fileName);
       if (checked.fixed) {
         text = checked.fixed;
-        sourceState.set(text);
-        setSource(text);
+        editor.current.setText(text);
       }
     } catch (error) {
       problem = describe(error);
     }
-    setSaving(true);
     try {
       if (current && current !== fileName) await renameScript(current, fileName);
       await writeScript(fileName, text);
@@ -768,19 +778,23 @@ export function ScriptEditorNative({ name, tokens, onClose, onSaved }: { name: s
       return;
     }
     setSaving(false);
+    setSource(text);
     setCurrent(fileName);
     setSaved({ name: baseName(fileName), source: text });
     setIssue(problem);
+    editor.current?.setError(problem?.line ?? null);
     if (problem) {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
       return;
     }
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    onSaved(fileName);
+    // A module has nothing to run; it stays open.
+    if (!isModuleFile(fileName)) onSaved(fileName);
   };
 
-  const close = () => {
-    if (!dirty) {
+  const close = async () => {
+    const latest = editor.current ? await editor.current.getText() : source;
+    if (latest === saved.source && nameDraft.trim() === saved.name) {
       onClose();
       return;
     }
@@ -791,13 +805,13 @@ export function ScriptEditorNative({ name, tokens, onClose, onSaved }: { name: s
   };
 
   const action = <NativeCircleButton tokens={tokens} accent label="Guardar" systemName="checkmark" onPress={() => void save()} busy={saving} disabled={source === null || (!dirty && current !== null)} />;
-  return <PageNative title={current ? baseName(current) : 'Nueva miniapp'} tokens={tokens} onBack={close} backLabel="Cerrar" action={action}>
+  return <PageNative title={current ? baseName(current) : 'Nueva miniapp'} tokens={tokens} onBack={() => void close()} backLabel="Cerrar" action={action}>
     {loadError ? <NativeVStack alignment="leading" spacing={12} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' }), padding({ horizontal: UI.pageInset, top: 6 })]}>
       <NativeText modifiers={textModifiers(tokens)}>{loadError}</NativeText>
       <NativeButton label="Reintentar" onPress={load} modifiers={[buttonStyle('bordered'), tint(tokens.blue)]} />
-    </NativeVStack> : source === null ? <NativeVStack modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity, alignment: 'top' }), padding({ top: 24 })]}><ProgressView /></NativeVStack>
-    : <ScrollView modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity }), scrollDismissesKeyboard('interactively')]}>
-      <NativeVStack alignment="leading" spacing={14} modifiers={[frame({ width, alignment: 'leading' }), padding({ horizontal: UI.pageInset, top: 6, bottom: 32 })]}>
+    </NativeVStack> : initial === null ? <NativeVStack modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity, alignment: 'top' }), padding({ top: 24 })]}><ProgressView /></NativeVStack>
+    : <NativeVStack alignment="leading" spacing={0} modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity, alignment: 'top' })]}>
+      <NativeHStack alignment="center" spacing={8} modifiers={[frame({ maxWidth: Infinity }), padding({ horizontal: UI.pageInset, bottom: 10 })]}>
         <NativeTextField
           text={nameState}
           placeholder="Nombre"
@@ -805,31 +819,29 @@ export function ScriptEditorNative({ name, tokens, onClose, onSaved }: { name: s
             setNameDraft(text);
             setIssue(null);
           }}
-          modifiers={[frame({ maxWidth: Infinity }), font({ textStyle: 'title3', weight: 'semibold' }), autocorrectionDisabled(), accessibilityLabel('Nombre del archivo')]}
+          modifiers={[frame({ maxWidth: Infinity }), font({ textStyle: 'title3', weight: 'semibold' }), autocorrectionDisabled(), textInputAutocapitalization('never'), accessibilityLabel('Nombre del archivo')]}
         />
-        <NativeDivider />
-        {issue ? <NativeHStack alignment="top" spacing={8} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' })]}>
-          <SymbolImage name="exclamationmark.triangle.fill" color={tokens.danger} size={14} />
-          <NativeText modifiers={[foregroundStyle(tokens.danger), font({ textStyle: 'footnote', design: 'monospaced' })]}>{issue.line ? `Línea ${issue.line}: ${issue.message}` : issue.message}</NativeText>
-        </NativeHStack> : null}
-        <NativeTextField
-          text={sourceState}
-          axis="vertical"
-          onTextChange={(text) => {
-            setSource(text);
-            if (issue?.line) setIssue(null);
-          }}
-          modifiers={[
-            frame({ maxWidth: Infinity, minHeight: 320, alignment: 'topLeading' }),
-            font({ size: 13, design: 'monospaced' }),
-            autocorrectionDisabled(),
-            textInputAutocapitalization('never'),
-            keyboardType('ascii-capable'),
-            accessibilityLabel('Código'),
-          ]}
-        />
+        <NativeText modifiers={[foregroundStyle(tokens.secondary), font({ textStyle: 'subheadline', design: 'monospaced' })]}>{/\.[jt]sx?$/i.test(nameDraft.trim()) ? '' : typing}</NativeText>
+      </NativeHStack>
+      {issue ? <NativeHStack alignment="top" spacing={8} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' }), padding({ horizontal: UI.pageInset, bottom: 10 })]}>
+        <SymbolImage name="exclamationmark.triangle.fill" color={tokens.danger} size={14} />
+        <NativeText modifiers={[foregroundStyle(tokens.danger), font({ textStyle: 'footnote', design: 'monospaced' }), textSelection(true)]}>{issue.line ? `Línea ${issue.line}: ${issue.message}` : issue.message}</NativeText>
+      </NativeHStack> : null}
+      <NativeVStack modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity })]}>
+        <RNHostView>
+          <CodeEditorRN
+            ref={editor}
+            initial={initial}
+            dark={tokens.mode === 'dark'}
+            typescript={/\.tsx?$/i.test(typing)}
+            onChange={(text) => {
+              setSource(text);
+              if (issue?.line) setIssue(null);
+            }}
+          />
+        </RNHostView>
       </NativeVStack>
-    </ScrollView>}
+    </NativeVStack>}
   </PageNative>;
 }
 
@@ -882,12 +894,14 @@ export function ScriptRowsNative({ tokens, onOpen, onEdit }: { tokens: ThemeToke
   return <>
     {files.map((file) => {
       const meta = metaFor(file.name);
+      // A module is imported by other files; tapping it opens the editor.
+      const module = isModuleFile(file.name);
       const hue = meta.color ? resolveColor(meta.color, tokens) : null;
       const iconColor = typeof hue === 'string' ? hue : tokens.slate;
       return <ContextMenu key={file.name}>
         <ContextMenu.Trigger>
           <NativeVStack alignment="leading" spacing={0} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' }), padding({ horizontal: 16, vertical: 4 }), background(tokens.surface), clipShape('roundedRectangle', UI.groupRadius)]}>
-            <MiniappRowNative title={meta.title} detail={meta.detail ?? file.name} icon={meta.icon as SFSymbol} iconColor={iconColor} iconBackground={typeof hue === 'string' ? withAlpha(hue, tokens.mode === 'dark' ? 0.18 : 0.14) : tokens.slateSoft} tokens={tokens} onPress={() => onOpen(file.name)} label={`Abrir ${meta.title}`} />
+            <MiniappRowNative title={meta.title} detail={meta.detail ?? file.name} icon={(module ? 'shippingbox' : meta.icon) as SFSymbol} iconColor={iconColor} iconBackground={typeof hue === 'string' ? withAlpha(hue, tokens.mode === 'dark' ? 0.18 : 0.14) : tokens.slateSoft} tokens={tokens} onPress={() => (module ? onEdit(file.name) : onOpen(file.name))} label={`${module ? 'Editar' : 'Abrir'} ${meta.title}`} />
           </NativeVStack>
         </ContextMenu.Trigger>
         <ContextMenu.Items>

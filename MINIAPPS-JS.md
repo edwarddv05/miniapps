@@ -1,8 +1,22 @@
 # Miniapps en .js
 
-Cada archivo `.js` o `.jsx` de la carpeta `miniapps` es una miniapp. Biblioteca las lista debajo de las miniapps fijas. El botón **+** crea una nueva o importa archivos desde la app Archivos. Mantén pulsada una fila para editarla, compartir el archivo o eliminarla.
+Cada archivo `.js`, `.jsx`, `.ts` o `.tsx` de la carpeta `miniapps` es una miniapp. Biblioteca las lista debajo de las miniapps fijas. El botón **+** crea una nueva o importa archivos desde la app Archivos. Mantén pulsada una fila para editarla, compartir el archivo o eliminarla.
 
-El archivo se transpila en el teléfono (JSX e `import`/`export`) y lo que devuelve se dibuja con SwiftUI.
+El archivo se transpila en el teléfono (JSX, tipos de TypeScript e `import`/`export`) y lo que devuelve se dibuja con SwiftUI. Los tipos solo se quitan: no se comprueban.
+
+## Editor
+
+El código se edita con números de línea, colores de sintaxis (JS, JSX y TS) y sugerencias de la API mientras escribes. Dentro de una etiqueta como `<Text ` sugiere sus props. Al escribir aparece encima del teclado una fila con deshacer, rehacer, sangría, los símbolos de código, buscar (⌕), sugerencias (…) y ocultar el teclado. Al guardar, un error marca su línea en rojo y la muestra.
+
+## Módulos y paquetes
+
+Un archivo cuyo nombre empieza con `_` (por ejemplo `_fechas.js`) es un módulo: no se ejecuta solo y al tocarlo en Biblioteca se abre el editor. Otros archivos lo usan así:
+
+```jsx
+import { formato } from './_fechas';
+```
+
+Los módulos ven la misma API que la miniapp. También se pueden importar paquetes de npm: `import dayjs from 'dayjs'` o `import dayjs from 'npm:dayjs@1.11'` con una versión fija. Se descargan una vez de esm.sh (de jsDelivr si esm.sh falla) y se guardan en el teléfono, así que después funcionan sin conexión. Solo sirven paquetes de JavaScript puro, sin módulos nativos ni APIs de Node.
 
 ## Pantalla completa
 
@@ -43,7 +57,13 @@ export default function App() {
 
 ## Componentes
 
-Todos aceptan `padding`, `width`, `height`, `minHeight`, `maxWidth`, `maxHeight`, `fill` (ancho completo), `background`, `radius`, `opacity`, `disabled`, `onTap` y `modifiers` (modificadores SwiftUI directos).
+Todos aceptan `padding`, `width`, `height`, `minHeight`, `maxWidth`, `maxHeight`, `fill` (ancho completo), `background`, `radius`, `opacity`, `disabled`, `onTap`, `onLongPress` y `modifiers` (modificadores SwiftUI directos).
+
+También `x` e `y` (desplazan en puntos), `scale` y `rotation` (grados). Para animarlos, `animateOn={valor}` anima cada cambio de ese valor y `animation` elige cómo: `default`, `spring`, `bouncy`, `easeInOut`, `easeIn`, `easeOut`, `linear` o `{ type: 'easeInOut', duration: 0.4 }`.
+
+```jsx
+<Image symbol="heart.fill" color="pink" scale={liked ? 1.3 : 1} animateOn={liked} animation="bouncy" onTap={() => setLiked(!liked)} />
+```
 
 | Componente | Props |
 | --- | --- |
@@ -67,6 +87,9 @@ Todos aceptan `padding`, `width`, `height`, `minHeight`, `maxWidth`, `maxHeight`
 | `Progress` | `value` de 0 a 1; sin `value` es un indicador giratorio |
 | `Empty` | `title`, `icon`, `detail` |
 | `Video` | Un video por `id` o URL en `source`. `autoplay`, `loop`, `muted`, `controls` (por defecto sí), `fit` (`contain`, `cover`), `aspect` (16/9), `width`, `height` |
+| `Stack` | Navegación entre pantallas. `root` (la primera pantalla), `props`, `title`, `header` (barra con el botón atrás; sí por defecto). Ver "Navegación" |
+| `Canvas` | Dibujo SVG. Hijos: `Svg.Path`, `Svg.Circle`, `Svg.Rect`, `Svg.Line`, `Svg.Polyline`, `Svg.Polygon`, `Svg.Ellipse`, `Svg.G`, `Svg.Text`, `Svg.LinearGradient`… `height` (240), `color` (fondo), `onPress({ x, y })`, `onDragStart`, `onDrag({ x, y, dx, dy, vx, vy })`, `onDragEnd` |
+| `Sketch` | Dibujo a mano. `value` (los trazos), `onChange(trazos)`, `color`, `lineWidth`, `height` (320). Los trazos se pueden guardar con `useStored` |
 | `MapView` | Mapa de Apple. `latitude`, `longitude`, `span` (grados visibles), `markers` (`{ latitude, longitude, title, detail, color, id }`), `showsUser`, `onPress(punto)`, `onPressMarker(marcador)`, `height` (260) |
 
 Los colores aceptan `accent`, `secondary`, `primary`, `danger`, `surface`, `background`, un color de clase o un hex.
@@ -104,6 +127,7 @@ Todo se copia a la carpeta de la miniapp y se identifica por un `id`. Guarda el 
 
 - `await pickImages({ multiple, limit })` abre la galería y `await takePhoto()` la cámara. Devuelven `{ id, width, height }`: una lista en el primer caso, o `null` si se cancela en el segundo. Las fotos se guardan con un máximo de 1600 px y una miniatura de 480 px, y se muestran con `<Photo id={…} />`. `deleteImage(id)` la borra.
 - `await pickVideos({ multiple, limit })` y `await recordVideo({ maxSeconds })` devuelven `{ id, width, height, duration }` (lista o uno). Se muestran con `<Video source={id} />`.
+- `await saveToPhotos(id)` guarda una foto o un video de la miniapp en Fotos. Solo pide permiso para añadir, no para ver la fototeca.
 - `useRecorder()`: `{ recording, seconds, start(), stop() }`. `await stop()` guarda la grabación y devuelve `{ id, duration }`.
 - `usePlayer(idOUrl)`: `{ playing, position, duration, loaded, play(), pause(), toggle(), seek(segundos) }`. `await playSound(idOUrl, { volume })` suena una vez sin interfaz.
 - `await pickFiles({ types, multiple })` copia archivos desde Archivos y devuelve `{ id, name, size, type }`. `await readFile(id)` lee uno como texto. `await saveFile('datos.csv', texto)` crea uno y devuelve su `id`.
@@ -122,6 +146,27 @@ Todo se copia a la carpeta de la miniapp y se identifica por un `id`. Guarda el 
 - `await notify.list()`, `await notify.cancel(id)`, `await notify.cancelAll()`: solo ven los avisos de esta miniapp.
 - Tocar un aviso abre su miniapp desde cero, con `launch.source === 'notification'` y sus `data` en `launch.data`.
 
+### Navegación
+
+```jsx
+export default function App() {
+  return <Stack root={Lista} />;
+}
+
+function Lista() {
+  const nav = useNavigation();
+  return <List><Section>
+    <Row label="Abrir" onPress={() => nav.push(Detalle, { id: 3 }, { title: 'Detalle' })} />
+  </Section></List>;
+}
+
+function Detalle({ id }) {
+  return <Text>Elemento {id}</Text>;
+}
+```
+
+`useNavigation()` da `push(Componente, props, { title })`, `pop()`, `replace(...)`, `popToRoot()`, `depth` y `canGoBack`. Las pantallas de abajo siguen montadas y conservan su estado. Se vuelve con el botón atrás o deslizando desde el borde izquierdo.
+
 ### Enlaces
 
 `miniapps://abrir/Notas` abre la miniapp Notas (con o sin `.js`, sin importar mayúsculas). Lo que va tras `?` llega en `launch.data`: `miniapps://abrir/Notas?nota=3` da `{ nota: '3' }`. Sirve para Atajos, widgets de otras apps o un enlace en Notas. En Expo Go el enlace es `exp://<dirección>/--/abrir/Notas`.
@@ -134,13 +179,13 @@ También se pueden importar: `import { useStored, Text } from 'superapp'`, adem�
 
 ## Respaldo
 
-El respaldo de Ajustes incluye cada miniapp con sus datos, fotos, grabaciones y archivos. Los videos no entran por su tamaño. Al restaurar, las miniapps del respaldo reemplazan a las del mismo nombre y las demás se quedan.
+El respaldo de Ajustes incluye cada miniapp con sus datos, fotos, grabaciones, archivos y videos. Sin videos es un `.json`; con videos es un archivo `.respaldo` que lleva sus bytes detrás del JSON. Al restaurar, las miniapps del respaldo reemplazan a las del mismo nombre y las demás se quedan.
 
 ## Errores
 
 Un error de sintaxis se muestra en el editor con su línea al guardar; el archivo se guarda igual. Un error al ejecutar reemplaza la miniapp con el mensaje y los botones Editar, Reintentar, Cerrar y Consola, también si ocurre dentro de un `onPress` o un temporizador. Las comillas tipográficas, el guion largo y los puntos suspensivos que mete el teclado de iOS se corrigen al guardar si rompen el código.
 
-Un bucle infinito no se puede interrumpir y congela la app hasta cerrarla.
+Un bucle (`while`, `do…while`, `for`) que tiene la app ocupada más de 3 segundos seguidos se detiene con un error en su línea, así que un bucle infinito ya no congela la app. Una recursión sin fin termina en un error de pila. Un `for…of` sobre un iterador infinito no se puede detener.
 
 ## Ejemplo con su propia interfaz
 

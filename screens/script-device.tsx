@@ -10,6 +10,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as Location from 'expo-location';
+import * as MediaLibrary from 'expo-media-library/legacy';
 import * as Notifications from 'expo-notifications';
 import { Accelerometer, Barometer, Gyroscope } from 'expo-sensors';
 import * as Speech from 'expo-speech';
@@ -199,6 +200,14 @@ export function createDeviceApi({ fileName, track }: DeviceContext) {
       return uri ? shareFile(uri) : Promise.reject(new Error('Archivo no válido.'));
     },
     fileUri: (id: string) => scriptMediaUri(fileName, String(id)),
+    // Asks only to add, so the miniapp never sees the photo library.
+    saveToPhotos: async (id: string) => {
+      const uri = scriptMediaUri(fileName, String(id));
+      if (!uri || !(isImageId(id) || /^vid-/.test(String(id)))) fail('Solo se pueden guardar fotos y videos de la miniapp.');
+      const permission = await MediaLibrary.requestPermissionsAsync(true);
+      if (!permission.granted) fail('Sin permiso para guardar en Fotos. Actívalo en Ajustes de iOS.');
+      await MediaLibrary.saveToLibraryAsync(uri!);
+    },
     deleteFile: (id: string) => deleteScriptMedia(fileName, String(id)),
     openBrowser: (url: string) => WebBrowser.openBrowserAsync(String(url)),
     openMaps: (target: string | (Point & { title?: string })) => Linking.openURL(typeof target === 'string'

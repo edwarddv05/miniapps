@@ -1,17 +1,20 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
+import { File, FileMode, Paths } from 'expo-file-system';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { LIBRARY_KEY, loadLibrary, parseLibrary } from './anime-library';
 import { CARDS_KEY, loadCards, parseCards } from './cards-store';
 import { parseSchedule, SCHEDULE_KEY } from './schedule-data';
 import { FARE_KEY, loadTrips, parseTrips, TRIPS_KEY } from './transit-trips';
-import { collectScriptsBackup, restoreScriptsBackup } from './script-files';
-import { parseScriptsBackup, type ScriptsBackup } from './script-runtime';
+import { collectScriptsBackup, restoreScriptsBackup, writeScriptVideos } from './script-files';
+import { backupHeader, parseScriptsBackup, readBackupHeader, utf8Decode, utf8Encode, type ScriptsBackup } from './script-runtime';
 
 // A copy of the owner's data in one file: schedule, anime list, cards, saved
-// trips and the .js miniapps with their data, photos and recordings (videos
-// stay out). Restoring checks the whole file before anything is replaced.
+// trips and the .js miniapps with their data, photos, recordings, files and
+// videos. Without videos the file is plain JSON; with them, the videos' bytes
+// follow the JSON (see BACKUP_MAGIC). Restoring checks the whole file before
+// anything is replaced.
 // The Gemini key stays out of it, and card photos stay on the phone.
 
 export const BACKUP_FORMAT = 'my-superapp-backup';
@@ -40,6 +43,8 @@ export type Backup = {
   createdAt: string;
   // Backups made before miniapps were included have none.
   data: Record<SectionName, unknown> & { fare: 'general' | 'student'; miniapps: ScriptsBackup | null };
+  // Set when the picked file carries videos: where their bytes start.
+  videoSource?: { uri: string; offset: number };
 };
 
 export function summarize(data: Backup['data']): BackupSummary {
@@ -125,18 +130,50 @@ export function parseBackup(text: string): Backup {
 export async function exportBackup() {
   const backup = await buildBackup();
   if (!FileSystem.cacheDirectory) throw new Error('El almacenamiento del dispositivo no está disponible.');
-  const uri = `${FileSystem.cacheDirectory}my-superapp-${backup.createdAt.slice(0, 10)}.json`;
-  await FileSystem.writeAsStringAsync(uri, JSON.stringify(backup));
-  await Sharing.shareAsync(uri, { mimeType: 'application/json', UTI: 'public.json', dialogTitle: 'Respaldo' });
+  const videos = backup.data.miniapps?.videos ?? [];
+  if (!videos.length) {
+    const uri = `${FileSystem.cacheDirectory}my-superapp-${backup.createdAt.slice(0, 10)}.json`;
+    await FileSystem.writeAsStringAsync(uri, JSON.stringify(backup));
+    await Sharing.shareAsync(uri, { mimeType: 'application/json', UTI: 'public.json', dialogTitle: 'Respaldo' });
+    return summarize(backup.data);
+  }
+  const json = utf8Encode(JSON.stringify(backup));
+  const file = new File(Paths.cache, `my-superapp-${backup.createdAt.slice(0, 10)}.respaldo`);
+  file.create({ overwrite: true });
+  const out = file.open(FileMode.ReadWrite);
+  try {
+    out.writeBytes(utf8Encode(backupHeader(json.length)));
+    out.writeBytes(json);
+    await writeScriptVideos(out, videos);
+  } finally {
+    out.close();
+  }
+  await Sharing.shareAsync(file.uri, { mimeType: 'application/octet-stream', dialogTitle: 'Respaldo' });
   return summarize(backup.data);
 }
 
 /** Lets the owner pick a backup file and checks it. Null when the picker is cancelled. */
 export async function pickBackup(): Promise<Backup | null> {
-  const result = await DocumentPicker.getDocumentAsync({ type: ['application/json', 'public.json', '*/*'], copyToCacheDirectory: true, multiple: false });
+  const result = await DocumentPicker.getDocumentAsync({ type: ['application/json', 'public.json', 'public.data', '*/*'], copyToCacheDirectory: true, multiple: false });
   if (result.canceled || !result.assets?.length) return null;
-  const text = await FileSystem.readAsStringAsync(result.assets[0].uri);
-  return parseBackup(text);
+  const uri = result.assets[0].uri;
+  const file = new File(uri);
+  const input = file.open(FileMode.ReadOnly);
+  let header: ReturnType<typeof readBackupHeader>;
+  let json: string;
+  try {
+    header = readBackupHeader(input.readBytes(Math.min(64, file.size)));
+    if (!header) return parseBackup(await FileSystem.readAsStringAsync(uri));
+    input.offset = header.jsonStart;
+    json = utf8Decode(input.readBytes(header.jsonLength));
+  } finally {
+    input.close();
+  }
+  const backup = parseBackup(json);
+  const offset = header.jsonStart + header.jsonLength;
+  const videoBytes = (backup.data.miniapps?.videos ?? []).reduce((total, video) => total + video.size, 0);
+  if (offset + videoBytes > file.size) throw new Error('El respaldo está incompleto.');
+  return { ...backup, videoSource: { uri, offset } };
 }
 
 /** Replaces the stored data with the backup's, all keys in one write, then reloads the stores. */
@@ -155,6 +192,6 @@ export async function restoreBackup(backup: Backup) {
     [FARE_KEY, backup.data.fare],
   ]);
   // Miniapps with the same name are replaced; the others on this phone stay.
-  if (backup.data.miniapps?.files.length) await restoreScriptsBackup(backup.data.miniapps);
+  if (backup.data.miniapps?.files.length) await restoreScriptsBackup(backup.data.miniapps, backup.videoSource);
   await Promise.all([loadLibrary(true), loadTrips(true), loadCards(true)]);
 }
