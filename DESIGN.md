@@ -110,6 +110,13 @@ The app's colour comes from its content, not from chrome. This section supersede
 - Shortcuts has a Descargar enlace action (Enlace, Formato, Calidad) that runs without opening the app. Its progress is a Live Activity: the picture, title and percentage, a bar with "50 de 120 MB" and the time left, and a ring in the Dynamic Island. When it ends it shows a check or a mark and opens Descargas when tapped, without saying so; the file joins Descargas the next time the app is opened. Its Guardar en parameter also puts the file in Photos (audio goes to Files) or in the app's Descargas folder in Files, and the finished activity says where it went. The action returns the file too, for any following Shortcuts action. The finished activity shows only the check and where it was saved, with no hint text.
 - Deleting drops the picture into a bin that rises from the bottom, opens its lid, slams it, wobbles and sinks; the grid closes the gap and the total counts down. A bar offers Deshacer for five seconds and the file is only removed from the phone after that.
 
+## Miniapps in .js — October 2026
+
+- Files in the documents folder `miniapps/` (`.js`, `.jsx`) appear in Biblioteca after the built-in tools, each in its own surface with the icon, colour and detail from its `meta`, or its file name. Long press: Editar, Compartir archivo, Eliminar. Biblioteca's header holds one glass `+` menu: Nueva miniapp, Importar archivo. With no files, Biblioteca shows only the built-in tools.
+- A running miniapp uses the tool header: back, its title, an icon-only pencil glass button for the editor. Loading is a spinner under the header; an error replaces the content with "Error en la línea N", the monospaced message, Editar (prominent) and Reintentar.
+- The editor is a page, not a sheet: back is Cerrar (asks before discarding changes), the save checkmark is the accent glass circle. The file name is a title-sized field; the code is a monospaced multiline field with autocorrection and capitalisation off. A syntax error stays above the code in the danger colour with its line, and the file is saved anyway.
+- Miniapps draw with the app's own SwiftUI views and tokens (`MINIAPPS-JS.md`), so they share its type, glass controls and colours.
+
 ## Product
 
 My SuperApp is a quiet personal home for small, focused tools. The shipped tools are Horario, a weekly planner for seeing and editing recurring classes or commitments, and Downloader, a compact downloader that runs yt-dlp inside the standalone app and falls back to the PC service in Expo Go.

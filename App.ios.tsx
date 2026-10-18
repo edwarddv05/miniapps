@@ -16,7 +16,7 @@ import { getGeminiApiKey, setGeminiApiKey, pickImagesAndScan } from './ai-schedu
 import { exportBackup, pickBackup, restoreBackup, summarize, summaryText, type Backup } from './backup';
 import { type ScannedClass } from './schedule-scan';
 import { type SavedTrip } from './transit-trips';
-import { DATA_SAVER_KEY, DAYS, DataStateNative, NativeCircleButton, PageNative, ReadingCanvasNative, type ScheduleView, type Screen, SectionHeadingNative, SymbolImage, THEME_KEY, type ThemeMode, type ThemeTokens, WeekStripNative,  capitalize, colorForKey, courseCount, currentDayIndex, durationLabel, getTokens, groupedListModifiers, minutesFromTime, momentFor, nextClassAfterToday, sortedEntries, textModifiers, timeRange, withAlpha } from './screens/shared';
+import { DATA_SAVER_KEY, DAYS, DataStateNative, NativeCircleButton, PageNative, ReadingCanvasNative, type ScheduleView, type Screen, MiniappRowNative, SectionHeadingNative, SymbolImage, THEME_KEY, type ThemeMode, type ThemeTokens, WeekStripNative,  capitalize, colorForKey, courseCount, currentDayIndex, durationLabel, getTokens, groupedListModifiers, minutesFromTime, momentFor, nextClassAfterToday, sortedEntries, textModifiers, timeRange, withAlpha } from './screens/shared';
 import { DownloaderNative, type SharedLink } from './screens/downloader';
 import { parseAppLink } from './app-links';
 import { syncScheduleWidget } from './widget-sync';
@@ -25,6 +25,7 @@ import { AnimeNative, AnimeTodayNative } from './screens/anime';
 import { TRANSIT_ICON, TransitNative, TransitTodayNative } from './screens/transit';
 import { CARDS_ICON, CardsNative, CardsTodayNative, useCardsLibraryDetail } from './screens/cards';
 import { AIScanReviewNative, APIKeySheetNative, ScheduleEditorNative, ScheduleNative } from './screens/schedule';
+import { ScriptEditorNative, ScriptNative, ScriptRowsNative, ScriptsMenuNative } from './screens/scripts';
 
 function HomeNative({ entries, tokens, loading, error, onOpenSchedule, onOpenAnime, onOpenTrip, onOpenCard, onRetry }: { entries: ScheduleEntry[]; tokens: ThemeTokens; loading: boolean; error: string | null; onOpenSchedule: () => void; onOpenAnime: (id: number) => void; onOpenTrip: (trip: SavedTrip) => void; onOpenCard: (cardId: string) => void; onRetry: () => void }) {
   const now = useCurrentTime();
@@ -110,7 +111,9 @@ function TimelineRowNative({ entry, tokens, last }: { entry: ScheduleEntry; toke
   </HStack>;
 }
 
-function MiniappsNative({ entries, tokens, loading, error, onOpenSchedule, onOpenDownloader, onOpenAnime, onOpenTransit, onOpenCards, onClearSchedule }: { entries: ScheduleEntry[]; tokens: ThemeTokens; loading: boolean; error: string | null; onOpenSchedule: () => void; onOpenDownloader: () => void; onOpenAnime: () => void; onOpenTransit: () => void; onOpenCards: () => void; onClearSchedule: () => void }) {
+type ScriptActions = { onOpenScript: (name: string) => void; onEditScript: (name: string | null) => void };
+
+function MiniappsNative({ entries, tokens, loading, error, onOpenSchedule, onOpenDownloader, onOpenAnime, onOpenTransit, onOpenCards, onClearSchedule, onOpenScript, onEditScript }: { entries: ScheduleEntry[]; tokens: ThemeTokens; loading: boolean; error: string | null; onOpenSchedule: () => void; onOpenDownloader: () => void; onOpenAnime: () => void; onOpenTransit: () => void; onOpenCards: () => void; onClearSchedule: () => void } & ScriptActions) {
   const scheduleRow = <MiniappRowNative title="Horario" detail={loading ? 'Cargando…' : error ? 'No disponible' : entries.length ? (courseCount(entries) === 1 ? '1 curso' : `${courseCount(entries)} cursos`) : 'Sin clases guardadas'} icon="calendar" iconColor={tokens.slate} iconBackground={tokens.slateSoft} tokens={tokens} onPress={onOpenSchedule} label="Abrir Miniapp Horario" />;
   const downloaderRow = <MiniappRowNative title="Downloader" detail="Audio y video" icon="arrow.down.circle" iconColor={tokens.blue} iconBackground={tokens.blueSoft} tokens={tokens} onPress={onOpenDownloader} label="Abrir Miniapp Downloader" />;
   const transitIcon = TRANSIT_ICON[tokens.mode];
@@ -131,7 +134,7 @@ function MiniappsNative({ entries, tokens, loading, error, onOpenSchedule, onOpe
   );
 
   return (
-    <PageNative title="Biblioteca" tokens={tokens}>
+    <PageNative title="Biblioteca" tokens={tokens} action={<ScriptsMenuNative tokens={tokens} onCreate={() => onEditScript(null)} onImported={(names) => { if (names.length === 1) onOpenScript(names[0]); }} />}>
       <ReadingCanvasNative tokens={tokens}>
         <VStack alignment="leading" spacing={14} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' })]}>
           {!loading && !error && entries.length > 0 ? (
@@ -146,27 +149,10 @@ function MiniappsNative({ entries, tokens, loading, error, onOpenSchedule, onOpe
           <VStack alignment="leading" spacing={0} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' }), padding({ horizontal: 16, vertical: 4 }), background(tokens.surface), clipShape('roundedRectangle', UI.groupRadius)]}>{animeRow}</VStack>
           <VStack alignment="leading" spacing={0} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' }), padding({ horizontal: 16, vertical: 4 }), background(tokens.surface), clipShape('roundedRectangle', UI.groupRadius)]}>{transitRow}</VStack>
           <VStack alignment="leading" spacing={0} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' }), padding({ horizontal: 16, vertical: 4 }), background(tokens.surface), clipShape('roundedRectangle', UI.groupRadius)]}>{cardsRow}</VStack>
+          <ScriptRowsNative tokens={tokens} onOpen={onOpenScript} onEdit={onEditScript} />
         </VStack>
       </ReadingCanvasNative>
     </PageNative>
-  );
-}
-
-function MiniappRowNative({ title, detail, icon, iconColor, iconBackground, tokens, onPress, label }: { title: string; detail: string; icon: SFSymbol; iconColor: string; iconBackground: string; tokens: ThemeTokens; onPress: () => void; label: string }) {
-  return (
-    <NativeButton onPress={onPress} modifiers={[buttonStyle('plain'), frame({ maxWidth: Infinity, minHeight: 72, alignment: 'leading' }), accessibilityLabel(`${label}, ${detail}`)]}>
-      <HStack alignment="center" spacing={14} modifiers={[frame({ maxWidth: Infinity, minHeight: 72, alignment: 'leading' }), padding({ vertical: 8 }), contentShape(shapes.rectangle())]}>
-        <VStack alignment="center" spacing={0} modifiers={[frame({ width: 44, height: 44 }), background(iconBackground), clipShape('roundedRectangle', UI.iconRadius)]}>
-          <SymbolImage name={icon} color={iconColor} size={22} />
-        </VStack>
-        <VStack alignment="leading" spacing={2}>
-          <NativeText modifiers={textModifiers(tokens, { style: 'title3', weight: 'semibold' })}>{title}</NativeText>
-          <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'subheadline' })}>{detail}</NativeText>
-        </VStack>
-        <Spacer />
-        <SymbolImage name="chevron.right" color={tokens.secondary} size={17} />
-      </HStack>
-    </NativeButton>
   );
 }
 
@@ -178,10 +164,10 @@ function HomeTabNative({ entries, tokens, loading, error, onOpenSchedule, onOpen
   );
 }
 
-function MiniappsTabNative({ entries, tokens, loading, error, destination, schedule, downloader, anime, transit, cards, onOpenSchedule, onOpenDownloader, onOpenAnime, onOpenTransit, onOpenCards, onClearSchedule }: { entries: ScheduleEntry[]; tokens: ThemeTokens; loading: boolean; error: string | null; destination: MiniappDestination; schedule: ReactNode; downloader: ReactNode; anime: ReactNode; transit: ReactNode; cards: ReactNode; onOpenSchedule: () => void; onOpenDownloader: () => void; onOpenAnime: () => void; onOpenTransit: () => void; onOpenCards: () => void; onClearSchedule: () => void }) {
+function MiniappsTabNative({ entries, tokens, loading, error, destination, schedule, downloader, anime, transit, cards, script, scriptEditor, onOpenSchedule, onOpenDownloader, onOpenAnime, onOpenTransit, onOpenCards, onClearSchedule, onOpenScript, onEditScript }: { entries: ScheduleEntry[]; tokens: ThemeTokens; loading: boolean; error: string | null; destination: MiniappDestination; schedule: ReactNode; downloader: ReactNode; anime: ReactNode; transit: ReactNode; cards: ReactNode; script: ReactNode; scriptEditor: ReactNode; onOpenSchedule: () => void; onOpenDownloader: () => void; onOpenAnime: () => void; onOpenTransit: () => void; onOpenCards: () => void; onClearSchedule: () => void } & ScriptActions) {
   return (
     <VStack modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity })]}>
-      {destination === 'schedule' ? schedule : destination === 'downloader' ? downloader : destination === 'anime' ? anime : destination === 'transit' ? transit : destination === 'cards' ? cards : <MiniappsNative entries={entries} tokens={tokens} loading={loading} error={error} onOpenSchedule={onOpenSchedule} onOpenDownloader={onOpenDownloader} onOpenAnime={onOpenAnime} onOpenTransit={onOpenTransit} onOpenCards={onOpenCards} onClearSchedule={onClearSchedule} />}
+      {destination === 'schedule' ? schedule : destination === 'downloader' ? downloader : destination === 'anime' ? anime : destination === 'transit' ? transit : destination === 'cards' ? cards : destination === 'script' && script ? script : destination === 'script-editor' ? scriptEditor : <MiniappsNative entries={entries} tokens={tokens} loading={loading} error={error} onOpenSchedule={onOpenSchedule} onOpenDownloader={onOpenDownloader} onOpenAnime={onOpenAnime} onOpenTransit={onOpenTransit} onOpenCards={onOpenCards} onClearSchedule={onClearSchedule} onOpenScript={onOpenScript} onEditScript={onEditScript} />}
     </VStack>
   );
 }
@@ -520,6 +506,21 @@ export default function App() {
     openAnime();
   };
 
+  // Miniapps from .js files: the one running, and the file open in the editor
+  // with the screen to go back to.
+  const [scriptName, setScriptName] = useState<string | null>(null);
+  const [scriptEdit, setScriptEdit] = useState<{ name: string | null; from: MiniappDestination; nonce: number } | null>(null);
+  const openScript = (name: string) => {
+    setScriptName(name);
+    setScreen('miniapps');
+    setDestination('script');
+  };
+  const editScript = (name: string | null, from: MiniappDestination = 'library') => {
+    setScriptEdit({ name, from, nonce: Date.now() });
+    setScreen('miniapps');
+    setDestination('script-editor');
+  };
+
   const openEditor = (entry: ScheduleEntry | null = null) => {
     if (!ready || writePending.current) return;
     setEditorEntry(entry);
@@ -618,10 +619,12 @@ export default function App() {
   const anime = <AnimeNative tokens={tokens} apiKey={apiKey} link={animeLink} onBack={() => setDestination('library')} />;
   const transit = <TransitNative tokens={tokens} link={transitLink} onBack={() => setDestination('library')} />;
   const cards = <CardsNative tokens={tokens} link={cardsLink} onBack={() => setDestination('library')} />;
+  const script = scriptName ? <ScriptNative key={scriptName} name={scriptName} tokens={tokens} onBack={() => setDestination('library')} onEdit={() => editScript(scriptName, 'script')} /> : null;
+  const scriptEditor = scriptEdit ? <ScriptEditorNative key={scriptEdit.nonce} name={scriptEdit.name} tokens={tokens} onClose={() => setDestination(scriptEdit.from === 'script' && scriptName ? 'script' : 'library')} onSaved={openScript} /> : null;
   const body = (
     <TabView selection={screen} onSelectionChange={(value) => setScreen(value as Screen)} modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity }), tint(tokens.blue)]}>
       <TabView.Tab value="home" label="Inicio" systemImage="house.fill"><HomeTabNative entries={entries} tokens={tokens} loading={loading} error={storageError} onOpenSchedule={() => openSchedule(currentDayIndex())} onOpenAnime={openAnimeDetail} onOpenTrip={openTransitTrip} onOpenCard={openCard} onRetry={loadData} /></TabView.Tab>
-      <TabView.Tab value="miniapps" label="Miniapps" systemImage="square.grid.2x2.fill"><MiniappsTabNative entries={entries} tokens={tokens} loading={loading} error={storageError} destination={destination} schedule={schedule} downloader={downloader} anime={anime} transit={transit} cards={cards} onOpenSchedule={() => openSchedule()} onOpenDownloader={openDownloader} onOpenAnime={openAnime} onOpenTransit={openTransit} onOpenCards={openCards} onClearSchedule={clearSchedule} /></TabView.Tab>
+      <TabView.Tab value="miniapps" label="Miniapps" systemImage="square.grid.2x2.fill"><MiniappsTabNative entries={entries} tokens={tokens} loading={loading} error={storageError} destination={destination} schedule={schedule} downloader={downloader} anime={anime} transit={transit} cards={cards} script={script} scriptEditor={scriptEditor} onOpenScript={openScript} onEditScript={(name) => editScript(name)} onOpenSchedule={() => openSchedule()} onOpenDownloader={openDownloader} onOpenAnime={openAnime} onOpenTransit={openTransit} onOpenCards={openCards} onClearSchedule={clearSchedule} /></TabView.Tab>
       <TabView.Tab value="settings" label="Ajustes" systemImage="gearshape.fill"><SettingsNative themeMode={themeMode} tokens={tokens} onThemeChange={changeTheme} apiKey={apiKey} onApiKeyChange={updateApiKey} onRestored={() => void loadData()} /></TabView.Tab>
     </TabView>
   );

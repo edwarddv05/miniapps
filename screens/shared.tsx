@@ -587,3 +587,22 @@ export function FilterChipsNative({ chips, width, tokens }: { chips: FilterChip[
     </HStack>)}
   </VStack>;
 }
+
+// A tool in Biblioteca: icon tile, name and a live detail line.
+export function MiniappRowNative({ title, detail, icon, iconColor, iconBackground, tokens, onPress, label }: { title: string; detail: string; icon: SFSymbol; iconColor: string; iconBackground: string; tokens: ThemeTokens; onPress: () => void; label: string }) {
+  return (
+    <NativeButton onPress={onPress} modifiers={[buttonStyle('plain'), frame({ maxWidth: Infinity, minHeight: 72, alignment: 'leading' }), accessibilityLabel(`${label}, ${detail}`)]}>
+      <HStack alignment="center" spacing={14} modifiers={[frame({ maxWidth: Infinity, minHeight: 72, alignment: 'leading' }), padding({ vertical: 8 }), contentShape(shapes.rectangle())]}>
+        <VStack alignment="center" spacing={0} modifiers={[frame({ width: 44, height: 44 }), background(iconBackground), clipShape('roundedRectangle', UI.iconRadius)]}>
+          <SymbolImage name={icon} color={iconColor} size={22} />
+        </VStack>
+        <VStack alignment="leading" spacing={2}>
+          <NativeText modifiers={textModifiers(tokens, { style: 'title3', weight: 'semibold' })}>{title}</NativeText>
+          <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary, style: 'subheadline' })}>{detail}</NativeText>
+        </VStack>
+        <Spacer />
+        <SymbolImage name="chevron.right" color={tokens.secondary} size={17} />
+      </HStack>
+    </NativeButton>
+  );
+}
