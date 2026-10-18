@@ -11,76 +11,21 @@ import * as Modifiers from '@expo/ui/swift-ui/modifiers';
 import { BottomSheet, Button as NativeButton, ContentUnavailableView, ContextMenu, Divider as NativeDivider, Form, HStack as NativeHStack, Image as NativeImage, Menu, Picker as NativePicker, ProgressView, ScrollView, Section as NativeSection, Slider as NativeSlider, Spacer as NativeSpacer, Stepper as NativeStepper, Text as NativeText, TextField as NativeTextField, Toggle as NativeToggle, VStack as NativeVStack, ZStack as NativeZStack, useNativeState } from '@expo/ui/swift-ui';
 import { accessibilityLabel, autocorrectionDisabled, buttonStyle, clipShape, controlSize, disabled, font, frame, glassEffect, keyboardType, lineLimit, menuIndicator, multilineTextAlignment, onSubmit, onTapGesture, opacity, padding, pickerStyle, scrollDismissesKeyboard, tag, textFieldStyle, textInputAutocapitalization, textSelection, type ViewModifier } from '@expo/ui/swift-ui/modifiers';
 import type { SFSymbol } from 'sf-symbols-typescript';
-import React, { Component, createContext, Fragment, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
+import React, { Component, Fragment, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Alert, Linking, Modal, PlatformColor, Share, type ColorValue } from 'react-native';
 import { background, foregroundStyle, tint } from '../native-colors';
 import { UI } from '../ui-structure';
+import { InListContext, ScriptFileContext, TokensContext, common, resolveColor, useTokens, type FrameAlignment, type ScriptLaunch, type ViewProps } from './script-context';
 import { createShakeDetector } from '../shake-detector';
 import type { ScheduleColor } from '../schedule-data';
-import { NEW_SCRIPT, ScriptError, baseName, checkScript, evaluateScript, parseScriptData, readMeta, scriptComponent, scriptFileName, staticMeta, type ScriptMeta } from '../script-runtime';
-import { deleteScript, deleteScriptImage, importScripts, loadScriptData, readScript, refreshScripts, renameScript, saveScriptData, saveScriptImage, scriptImageUri, shareScript, useScripts, writeScript, type ScriptFile } from '../script-files';
+import { NEW_SCRIPT, ScriptError, baseName, checkScript, evaluateScript, formatLog, readMeta, scriptComponent, scriptFileName, staticMeta, type ScriptMeta } from '../script-runtime';
+import { deleteScript, deleteScriptMedia, importScripts, loadScriptData, readScript, refreshScripts, renameScript, saveScriptImage, saveScriptValues, scriptImageUri, shareScript, useScripts, writeScript, type ScriptFile } from '../script-files';
+import { DEVICE_COMPONENTS, DEVICE_HOOKS, createDeviceApi } from './script-device';
 import { CIRCLE_CONTROL_SIZE, MiniappRowNative, NativeCircleButton, PageNative, SectionHeadingNative, SymbolImage, colorForKey, nativeGlassAvailable, textModifiers, usePageWidth, withAlpha, type ThemeTokens } from './shared';
 
 // ---------------------------------------------------------------------------
 // Views a miniapp can use. Each takes a few plain props and maps them onto the
 // app's SwiftUI views and theme; `modifiers` passes raw SwiftUI modifiers on.
-
-const TokensContext = createContext<ThemeTokens | null>(null);
-const InListContext = createContext(false);
-// The running file's name, so Photo finds that miniapp's images.
-const ScriptFileContext = createContext('');
-const useTokens = () => useContext(TokensContext) as ThemeTokens;
-
-const CLASS_COLORS = new Set<string>(['red', 'orange', 'yellow', 'green', 'teal', 'blue', 'indigo', 'purple', 'pink', 'brown']);
-
-/** 'accent', 'secondary', 'danger', a class colour name ('orange') or any hex. */
-function resolveColor(value: unknown, tokens: ThemeTokens, role: 'main' | 'ink' = 'main'): ColorValue | undefined {
-  if (typeof value !== 'string' || !value) return undefined;
-  if (value === 'accent') return tokens.blue;
-  if (value === 'secondary') return tokens.secondary;
-  if (value === 'primary') return tokens.text;
-  if (value === 'danger') return tokens.danger;
-  if (value === 'surface') return tokens.surface;
-  if (value === 'background') return tokens.background;
-  if (CLASS_COLORS.has(value)) {
-    const color = colorForKey(value as ScheduleColor, tokens.mode);
-    return role === 'ink' ? color.ink : color.main;
-  }
-  return value;
-}
-
-type FrameAlignment = 'center' | 'leading' | 'trailing' | 'top' | 'bottom' | 'topLeading' | 'topTrailing' | 'bottomLeading' | 'bottomTrailing';
-type ViewProps = {
-  padding?: number | { top?: number; bottom?: number; leading?: number; trailing?: number; horizontal?: number; vertical?: number };
-  width?: number;
-  height?: number;
-  minHeight?: number;
-  maxWidth?: number;
-  maxHeight?: number;
-  fill?: boolean;
-  frameAlignment?: FrameAlignment;
-  background?: string;
-  radius?: number;
-  opacity?: number;
-  disabled?: boolean;
-  onTap?: () => void;
-  modifiers?: ViewModifier[];
-};
-
-function common(props: ViewProps, tokens: ThemeTokens): ViewModifier[] {
-  const result: ViewModifier[] = [];
-  if (typeof props.padding === 'number') result.push(padding({ all: props.padding }));
-  else if (props.padding) result.push(padding(props.padding));
-  const size = { width: props.width, height: props.height, minHeight: props.minHeight, maxWidth: props.fill ? Infinity : props.maxWidth, maxHeight: props.maxHeight };
-  if (Object.values(size).some((value) => value !== undefined)) result.push(frame({ ...size, alignment: props.frameAlignment ?? (props.fill ? 'leading' : undefined) }));
-  const fill = resolveColor(props.background, tokens);
-  if (fill) result.push(background(fill));
-  if (props.radius !== undefined) result.push(clipShape('roundedRectangle', props.radius));
-  if (props.opacity !== undefined) result.push(opacity(props.opacity));
-  if (props.disabled) result.push(disabled(true));
-  if (props.onTap) result.push(onTapGesture(props.onTap));
-  return [...result, ...(Array.isArray(props.modifiers) ? props.modifiers : [])];
-}
 
 function textOf(children: ReactNode) {
   return React.Children.toArray(children).map((child) => (typeof child === 'string' || typeof child === 'number' ? String(child) : '')).join('');
@@ -288,7 +233,7 @@ function useTheme() {
   return useMemo(() => ({ mode: tokens.mode, accent: tokens.blue, text: tokens.text, secondary: tokens.secondary, background: tokens.background, surface: tokens.surface, danger: tokens.danger, color: (name: string) => resolveColor(name, tokens) }), [tokens]);
 }
 
-const COMPONENTS = { Text, VStack, HStack, ZStack, Spacer, Divider, Page, List, Section, Card, Heading, Row, Button, IconButton, Image, Photo, Toggle, Slider, Stepper, TextField, Picker, Progress, Empty };
+const COMPONENTS = { Text, VStack, HStack, ZStack, Spacer, Divider, Page, List, Section, Card, Heading, Row, Button, IconButton, Image, Photo, Toggle, Slider, Stepper, TextField, Picker, Progress, Empty, ...DEVICE_COMPONENTS };
 const TEXT_TYPES = new Set<unknown>([Text, SwiftUI.Text]);
 
 // Raw SwiftUI for anything the views above do not cover. Colour modifiers are
@@ -302,9 +247,48 @@ const RAW_MODIFIERS = { ...Modifiers, background, foregroundStyle, tint };
 type Report = (error: unknown) => void;
 type Runtime = { scope: Record<string, unknown>; modules: Record<string, unknown>; dispose: () => void };
 
-function createRuntime(fileName: string, data: Record<string, unknown>, report: Report, close: () => void): Runtime {
+// What a miniapp writes with console.*, kept per run outside React state, so
+// logging while drawing never redraws the miniapp.
+type LogLevel = 'log' | 'info' | 'warn' | 'error';
+type LogEntry = { id: number; level: LogLevel; text: string; time: number };
+const MAX_LOGS = 500;
+
+function createLogBook() {
+  let entries: LogEntry[] = [];
+  let next = 0;
+  const listeners = new Set<() => void>();
+  const emit = () => listeners.forEach((listener) => listener());
+  return {
+    add(level: LogLevel, text: string) {
+      entries = [...entries.slice(-(MAX_LOGS - 1)), { id: next++, level, text, time: Date.now() }];
+      emit();
+    },
+    clear() {
+      entries = [];
+      emit();
+    },
+    get: () => entries,
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+}
+type LogBook = ReturnType<typeof createLogBook>;
+
+function createRuntime(fileName: string, data: Record<string, unknown>, report: Report, close: () => void, logs: LogBook, launch: ScriptLaunch): Runtime {
   let disposed = false;
   const timers = new Map<ReturnType<typeof globalThis.setTimeout>, 'timeout' | 'interval'>();
+  // Players, speech and other things to stop when the run ends.
+  const cleanups = new Set<() => void>();
+  const track = (cleanup: () => void) => {
+    cleanups.add(cleanup);
+    return () => {
+      cleanups.delete(cleanup);
+    };
+  };
 
   const guard = <T extends (...args: never[]) => unknown>(fn: T) => (...args: Parameters<T>) => {
     if (disposed) return undefined;
@@ -336,11 +320,16 @@ function createRuntime(fileName: string, data: Record<string, unknown>, report: 
     return React.createElement(type as React.ElementType, next, ...(kids as ReactNode[]));
   }
 
+  // Only the keys changed since the last write are saved, each as its own entry.
+  const dirty = new Set<string>();
   let saveTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
   const flush = () => {
     if (saveTimer) globalThis.clearTimeout(saveTimer);
     saveTimer = null;
-    void saveScriptData(fileName, data).catch(() => Alert.alert('No se pudieron guardar los datos', baseName(fileName)));
+    if (!dirty.size) return;
+    const changes = [...dirty].map((key): [string, unknown] => [key, data[key]]);
+    dirty.clear();
+    void saveScriptValues(fileName, changes).catch(() => Alert.alert('No se pudieron guardar los datos', baseName(fileName)));
   };
   const scheduleSave = () => {
     if (saveTimer) globalThis.clearTimeout(saveTimer);
@@ -350,17 +339,24 @@ function createRuntime(fileName: string, data: Record<string, unknown>, report: 
   const storage = {
     get: (key: string, fallback: unknown = null) => (Object.prototype.hasOwnProperty.call(data, key) ? data[key] : fallback),
     set: (key: string, value: unknown) => {
+      key = String(key);
       if (value === undefined) delete data[key];
       else data[key] = JSON.parse(JSON.stringify(value));
+      dirty.add(key);
       scheduleSave();
     },
     remove: (key: string) => {
+      key = String(key);
       delete data[key];
+      dirty.add(key);
       scheduleSave();
     },
     keys: () => Object.keys(data),
     clear: () => {
-      for (const key of Object.keys(data)) delete data[key];
+      for (const key of Object.keys(data)) {
+        delete data[key];
+        dirty.add(key);
+      }
       scheduleSave();
     },
   };
@@ -430,13 +426,21 @@ function createRuntime(fileName: string, data: Record<string, unknown>, report: 
     return saveScriptImage(fileName, result.assets[0]);
   };
 
+  const write = (level: LogLevel) => (...args: unknown[]) => {
+    if (!disposed) logs.add(level, formatLog(args));
+  };
+  const console = { log: write('log'), info: write('info'), debug: write('log'), warn: write('warn'), error: write('error'), clear: () => logs.clear() };
+
   const scope: Record<string, unknown> = {
     React, Fragment, h,
     useState, useEffect, useMemo, useRef, useCallback, useReducer, useStored, useTheme,
+    ...DEVICE_HOOKS,
     ...COMPONENTS,
-    storage, haptic, alert, confirm, prompt,
+    storage, haptic, alert, confirm, prompt, console,
+    launch: Object.freeze({ ...launch }),
+    ...createDeviceApi({ fileName, track }),
     pickImages, takePhoto,
-    deleteImage: (id: string) => deleteScriptImage(fileName, String(id)),
+    deleteImage: (id: string) => deleteScriptMedia(fileName, String(id)),
     close: () => {
       if (!disposed) close();
     },
@@ -458,7 +462,15 @@ function createRuntime(fileName: string, data: Record<string, unknown>, report: 
     dispose: () => {
       disposed = true;
       for (const id of [...timers.keys()]) stopTimer(id);
-      if (saveTimer) flush();
+      for (const cleanup of [...cleanups]) {
+        try {
+          cleanup();
+        } catch {
+          // A player that is already gone has nothing left to stop.
+        }
+      }
+      cleanups.clear();
+      flush();
     },
   };
 }
@@ -483,7 +495,7 @@ class ScriptBoundary extends Component<{ onError: Report; children: ReactNode },
   }
 }
 
-function FailureNative({ failure, tokens, onEdit, onRetry, onClose }: { failure: Failure; tokens: ThemeTokens; onEdit: () => void; onRetry: () => void; onClose: () => void }) {
+function FailureNative({ failure, tokens, onEdit, onRetry, onConsole, onClose }: { failure: Failure; tokens: ThemeTokens; onEdit: () => void; onRetry: () => void; onConsole: () => void; onClose: () => void }) {
   return <ScrollView modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity })]}>
     <NativeVStack alignment="leading" spacing={12} modifiers={[frame({ width: usePageWidth(), alignment: 'leading' }), padding({ horizontal: UI.pageInset, top: 24, bottom: 32 })]}>
       <NativeHStack alignment="center" spacing={10}>
@@ -496,6 +508,7 @@ function FailureNative({ failure, tokens, onEdit, onRetry, onClose }: { failure:
         <NativeButton label="Reintentar" systemImage="arrow.clockwise" onPress={onRetry} modifiers={[buttonStyle(nativeGlassAvailable ? 'glass' : 'bordered'), controlSize('large'), foregroundStyle(tokens.text)]} />
         <NativeButton label="Cerrar" systemImage="xmark" onPress={onClose} modifiers={[buttonStyle(nativeGlassAvailable ? 'glass' : 'bordered'), controlSize('large'), foregroundStyle(tokens.text)]} />
       </NativeHStack>
+      <NativeButton label="Consola" systemImage="terminal" onPress={onConsole} modifiers={[buttonStyle('plain'), foregroundStyle(tokens.blue)]} />
     </NativeVStack>
   </ScrollView>;
 }
@@ -524,7 +537,7 @@ function useShake(enabled: boolean, onShake: () => void) {
 }
 
 /** The app's own panel over a running miniapp, opened by shaking. */
-function ScriptMenuNative({ meta, name, tokens, onRestart, onEdit, onClose }: { meta: ScriptMeta | null; name: string; tokens: ThemeTokens; onRestart: () => void; onEdit: () => void; onClose: () => void }) {
+function ScriptMenuNative({ meta, name, tokens, logCount, onRestart, onEdit, onConsole, onClose }: { meta: ScriptMeta | null; name: string; tokens: ThemeTokens; logCount: number; onRestart: () => void; onEdit: () => void; onConsole: () => void; onClose: () => void }) {
   const hue = meta?.color ? resolveColor(meta.color, tokens) : null;
   const iconColor = typeof hue === 'string' ? hue : tokens.slate;
   return <NativeVStack spacing={0} modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity, alignment: 'top' }), background(tokens.background)]}>
@@ -541,11 +554,53 @@ function ScriptMenuNative({ meta, name, tokens, onRestart, onEdit, onClose }: { 
       <NativeSection>
         <NativeButton label="Reiniciar" systemImage="arrow.clockwise" onPress={onRestart} modifiers={[tint(tokens.blue)]} />
         <NativeButton label="Editar" systemImage="pencil" onPress={onEdit} modifiers={[tint(tokens.blue)]} />
+        <NativeButton onPress={onConsole} modifiers={[tint(tokens.blue)]}>
+          <NativeHStack alignment="center" spacing={0}>
+            <SwiftUI.Label title="Consola" systemImage="terminal" />
+            <NativeSpacer />
+            {logCount ? <NativeText modifiers={[foregroundStyle(tokens.secondary), Modifiers.monospacedDigit()]}>{String(logCount)}</NativeText> : null}
+          </NativeHStack>
+        </NativeButton>
       </NativeSection>
       <NativeSection>
         <NativeButton label="Cerrar miniapp" systemImage="xmark.circle" role="destructive" onPress={onClose} />
       </NativeSection>
     </Form>
+  </NativeVStack>;
+}
+
+const LOG_COLORS: Record<LogLevel, (tokens: ThemeTokens) => ColorValue> = {
+  log: (tokens) => tokens.text,
+  info: (tokens) => tokens.blue,
+  warn: (tokens) => colorForKey('orange', tokens.mode).ink,
+  error: (tokens) => tokens.danger,
+};
+const timeFormat = new Intl.DateTimeFormat('es-PE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+
+/** What the miniapp wrote with console.*, newest last. */
+function ConsoleNative({ logs, tokens, onBack }: { logs: LogBook; tokens: ThemeTokens; onBack: () => void }) {
+  const entries = useSyncExternalStore(logs.subscribe, logs.get);
+  const copy = () => {
+    void Clipboard.setStringAsync(entries.map((entry) => `${timeFormat.format(entry.time)} ${entry.level === 'log' ? '' : `[${entry.level}] `}${entry.text}`).join('\n'));
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+  return <NativeVStack spacing={0} modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity, alignment: 'top' }), background(tokens.background)]}>
+    <NativeHStack alignment="center" spacing={12} modifiers={[frame({ maxWidth: Infinity }), padding({ horizontal: UI.pageInset, top: 20, bottom: 10 })]}>
+      <NativeCircleButton tokens={tokens} label="Volver" systemName="chevron.left" onPress={onBack} />
+      <NativeText modifiers={[...textModifiers(tokens, { style: 'headline', weight: 'semibold' }), frame({ maxWidth: Infinity })]}>Consola</NativeText>
+      <NativeCircleButton tokens={tokens} label="Copiar" systemName="doc.on.doc" onPress={copy} disabled={!entries.length} />
+      <NativeCircleButton tokens={tokens} label="Borrar" systemName="trash" onPress={logs.clear} disabled={!entries.length} />
+    </NativeHStack>
+    {entries.length ? <ScrollView modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity }), Modifiers.defaultScrollAnchor('bottom')]}>
+      <SwiftUI.LazyVStack alignment="leading" spacing={8} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' }), padding({ horizontal: UI.pageInset, bottom: 24 })]}>
+        {entries.map((entry) => <NativeHStack key={entry.id} alignment="firstTextBaseline" spacing={8} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' })]}>
+          <NativeText modifiers={[foregroundStyle(tokens.secondary), font({ size: 11, design: 'monospaced' })]}>{timeFormat.format(entry.time)}</NativeText>
+          <NativeText modifiers={[foregroundStyle(LOG_COLORS[entry.level](tokens)), font({ size: 13, design: 'monospaced' }), textSelection(true), frame({ maxWidth: Infinity, alignment: 'leading' })]}>{entry.text}</NativeText>
+        </NativeHStack>)}
+      </SwiftUI.LazyVStack>
+    </ScrollView> : <NativeVStack modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity })]}>
+      <NativeText modifiers={textModifiers(tokens, { color: tokens.secondary })}>Sin mensajes</NativeText>
+    </NativeVStack>}
   </NativeVStack>;
 }
 
@@ -558,18 +613,25 @@ type Loaded = { App: (props: Record<string, never>) => unknown; meta: ScriptMeta
  * the file's own close() or quitting the app leaves it. Errors replace the
  * view until the file is edited or run again.
  */
-function ScriptNative({ name, tokens, shake, onClose, onEdit }: { name: string; tokens: ThemeTokens; shake: boolean; onClose: () => void; onEdit: () => void }) {
+function ScriptNative({ name, tokens, shake, launch, onClose, onEdit }: { name: string; tokens: ThemeTokens; shake: boolean; launch: ScriptLaunch; onClose: () => void; onEdit: () => void }) {
   const [run, setRun] = useState(0);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const report = useCallback((error: unknown) => setFailure((current) => current ?? describe(error)), []);
+  const [panel, setPanel] = useState<'menu' | 'console' | null>(null);
+  const logs = useMemo(createLogBook, []);
+  const report = useCallback((error: unknown) => {
+    const found = describe(error);
+    logs.add('error', found.line ? `Línea ${found.line}: ${found.message}` : found.message);
+    setFailure((current) => current ?? found);
+  }, [logs]);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  const launchRef = useRef(launch);
+  launchRef.current = launch;
 
-  useShake(shake && !menuOpen, () => {
+  useShake(shake && !panel, () => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setMenuOpen(true);
+    setPanel('menu');
   });
 
   useEffect(() => {
@@ -579,10 +641,10 @@ function ScriptNative({ name, tokens, shake, onClose, onEdit }: { name: string; 
     setFailure(null);
     void (async () => {
       try {
-        const [source, raw] = await Promise.all([readScript(name), loadScriptData(name)]);
+        const [source, data] = await Promise.all([readScript(name), loadScriptData(name)]);
         if (cancelled) return;
         const { code } = checkScript(source);
-        runtime = createRuntime(name, parseScriptData(raw), report, () => closeRef.current());
+        runtime = createRuntime(name, data, report, () => closeRef.current(), logs, launchRef.current);
         const exports = evaluateScript(code, runtime.scope, runtime.modules);
         if (cancelled) return;
         setLoaded({ App: scriptComponent(exports), meta: readMeta(exports, name), runtime });
@@ -594,7 +656,7 @@ function ScriptNative({ name, tokens, shake, onClose, onEdit }: { name: string; 
       cancelled = true;
       runtime?.dispose();
     };
-  }, [name, run, report]);
+  }, [name, run, report, logs]);
 
   // A failed run stops its timers so nothing keeps firing behind the error.
   useEffect(() => {
@@ -602,11 +664,11 @@ function ScriptNative({ name, tokens, shake, onClose, onEdit }: { name: string; 
   }, [failure, loaded]);
 
   const restart = () => {
-    setMenuOpen(false);
+    setPanel(null);
     setRun((value) => value + 1);
   };
   return <NativeZStack alignment="top" modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity })]}>
-    {failure ? <FailureNative failure={failure} tokens={tokens} onEdit={onEdit} onRetry={restart} onClose={onClose} />
+    {failure ? <FailureNative failure={failure} tokens={tokens} onEdit={onEdit} onRetry={restart} onConsole={() => setPanel('console')} onClose={onClose} />
       : !loaded ? <NativeVStack modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity })]}><ProgressView /></NativeVStack>
       : <TokensContext.Provider value={tokens}>
         <ScriptFileContext.Provider value={name}>
@@ -617,19 +679,23 @@ function ScriptNative({ name, tokens, shake, onClose, onEdit }: { name: string; 
           </ScriptBoundary>
         </ScriptFileContext.Provider>
       </TokensContext.Provider>}
-    <BottomSheet isPresented={menuOpen} onIsPresentedChange={setMenuOpen} onDismiss={() => setMenuOpen(false)}>
-      {menuOpen ? <SwiftUI.Group modifiers={[Modifiers.presentationDetents([{ height: 300 }]), Modifiers.presentationDragIndicator('visible')]}>
-        <ScriptMenuNative meta={loaded?.meta ?? null} name={name} tokens={tokens} onRestart={restart} onEdit={() => { setMenuOpen(false); onEdit(); }} onClose={() => { setMenuOpen(false); onClose(); }} />
+    <BottomSheet isPresented={panel !== null} onIsPresentedChange={(open) => { if (!open) setPanel(null); }} onDismiss={() => setPanel(null)}>
+      {panel === 'menu' ? <SwiftUI.Group modifiers={[Modifiers.presentationDetents([{ height: 340 }]), Modifiers.presentationDragIndicator('visible')]}>
+        <ScriptMenuNative meta={loaded?.meta ?? null} name={name} tokens={tokens} logCount={logs.get().length} onRestart={restart} onEdit={() => { setPanel(null); onEdit(); }} onConsole={() => setPanel('console')} onClose={() => { setPanel(null); onClose(); }} />
+      </SwiftUI.Group> : panel === 'console' ? <SwiftUI.Group modifiers={[Modifiers.presentationDetents(['medium', 'large']), Modifiers.presentationDragIndicator('visible')]}>
+        <ConsoleNative logs={logs} tokens={tokens} onBack={() => setPanel(failure ? null : 'menu')} />
       </SwiftUI.Group> : null}
     </BottomSheet>
   </NativeZStack>;
 }
 
-/** Presents a running miniapp full screen, over the tab bar, in its own SwiftUI host. */
-export function ScriptRunnerNative({ name, visible, shake, tokens, onClose, onEdit }: { name: string | null; visible: boolean; shake: boolean; tokens: ThemeTokens; onClose: () => void; onEdit: (name: string) => void }) {
+const LIBRARY_LAUNCH: ScriptLaunch = { source: 'library', data: null };
+
+/** Presents a running miniapp full screen, over the tab bar, in its own SwiftUI host. `runKey` starts it afresh. */
+export function ScriptRunnerNative({ name, visible, shake, tokens, launch = LIBRARY_LAUNCH, runKey = 0, onClose, onEdit }: { name: string | null; visible: boolean; shake: boolean; tokens: ThemeTokens; launch?: ScriptLaunch; runKey?: number; onClose: () => void; onEdit: (name: string) => void }) {
   return <Modal visible={visible && Boolean(name)} presentationStyle="fullScreen" animationType="slide" onRequestClose={onClose}>
     <Host style={{ flex: 1, backgroundColor: PlatformColor('systemBackground') }} colorScheme={tokens.mode} seedColor={tokens.blue} useViewportSizeMeasurement>
-      {name ? <ScriptNative key={name} name={name} tokens={tokens} shake={shake} onClose={onClose} onEdit={() => onEdit(name)} /> : <NativeVStack>{null}</NativeVStack>}
+      {name ? <ScriptNative key={`${name}#${runKey}`} name={name} tokens={tokens} shake={shake} launch={launch} onClose={onClose} onEdit={() => onEdit(name)} /> : <NativeVStack>{null}</NativeVStack>}
     </Host>
   </Modal>;
 }

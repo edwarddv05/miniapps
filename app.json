@@ -41,7 +41,8 @@
         "expo-image-picker",
         {
           "photosPermission": "La app necesita acceso a tus fotos para escanear y generar tu horario automáticamente.",
-          "cameraPermission": "La app usa la cámara para añadir fotos a tus miniapps."
+          "cameraPermission": "La app usa la cámara para añadir fotos a tus miniapps.",
+          "microphonePermission": "La app usa el micrófono al grabar video en tus miniapps."
         }
       ],
       "expo-video",
@@ -49,12 +50,26 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "La app usa tu ubicación para mostrarte las estaciones del Metropolitano más cercanas."
+          "locationWhenInUsePermission": "La app usa tu ubicación para mostrarte las estaciones del Metropolitano cercanas y en las miniapps que la piden."
         }
       ],
       "expo-secure-store",
       "@bacons/apple-targets",
-      "./modules/superapp-native/app.plugin.js"
+      "./modules/superapp-native/app.plugin.js",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "La app usa el micrófono para grabar audio en tus miniapps."
+        }
+      ],
+      "expo-web-browser",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "La app usa Face ID para desbloquear las miniapps que lo piden."
+        }
+      ],
+      "expo-notifications"
     ]
   }
 }

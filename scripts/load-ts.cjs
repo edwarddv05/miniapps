@@ -59,6 +59,13 @@ function memoryStorage(initial = {}) {
       if (storage.failWrites) throw new Error('write failed');
       for (const [key, value] of pairs) data.set(key, value);
     },
+    async getAllKeys() {
+      if (storage.failReads) throw new Error('read failed');
+      return [...data.keys()];
+    },
+    async multiRemove(keys) {
+      for (const key of keys) data.delete(key);
+    },
   };
   return storage;
 }

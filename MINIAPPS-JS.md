@@ -8,7 +8,7 @@ El archivo se transpila en el teléfono (JSX e `import`/`export`) y lo que devue
 
 La miniapp se abre a pantalla completa, encima de la barra de pestañas. La app no pone cabecera, título ni fondo: la pantalla es solo lo que dibuja el archivo, sobre el fondo del sistema. El contenido respeta las áreas seguras; para ocupar también la zona de la isla y el indicador de inicio usa `modifiers={[modifiers.ignoreSafeArea()]}`.
 
-La app no pone ningún control encima. Si agitas el teléfono se abre el panel de la app, con **Reiniciar**, **Editar** y **Cerrar miniapp**. Esto se activa o desactiva en Ajustes → Miniapps → "Agitar para abrir el menú". Si lo desactivas, solo se sale con un `close()` de la propia miniapp, o cerrando la app por completo y volviendo a abrirla. La pantalla de error siempre tiene Cerrar.
+La app no pone ningún control encima. Si agitas el teléfono se abre el panel de la app, con **Reiniciar**, **Editar**, **Consola** y **Cerrar miniapp**. Esto se activa o desactiva en Ajustes → Miniapps → "Agitar para abrir el menú". Si lo desactivas, solo se sale con un `close()` de la propia miniapp, o cerrando la app por completo y volviendo a abrirla. La pantalla de error siempre tiene Cerrar y Consola.
 
 En Expo Go, agitar también abre el menú de desarrollo de Expo. Para que no se abran los dos, desactiva "Shake device" en las herramientas de ese menú.
 
@@ -66,6 +66,8 @@ Todos aceptan `padding`, `width`, `height`, `minHeight`, `maxWidth`, `maxHeight`
 | `Picker` | `value`, `onChange`, `options` (textos o `{ label, value }`), `label`, `style` (`menu`, `segmented`, `wheel`, `inline`) |
 | `Progress` | `value` de 0 a 1; sin `value` es un indicador giratorio |
 | `Empty` | `title`, `icon`, `detail` |
+| `Video` | Un video por `id` o URL en `source`. `autoplay`, `loop`, `muted`, `controls` (por defecto sí), `fit` (`contain`, `cover`), `aspect` (16/9), `width`, `height` |
+| `MapView` | Mapa de Apple. `latitude`, `longitude`, `span` (grados visibles), `markers` (`{ latitude, longitude, title, detail, color, id }`), `showsUser`, `onPress(punto)`, `onPressMarker(marcador)`, `height` (260) |
 
 Los colores aceptan `accent`, `secondary`, `primary`, `danger`, `surface`, `background`, un color de clase o un hex.
 
@@ -77,22 +79,66 @@ Para lo que no cubren, `SwiftUI` trae todos los componentes de `@expo/ui/swift-u
 
 ## Funciones
 
+### Estado y datos
+
 - Hooks de React: `useState`, `useEffect`, `useMemo`, `useRef`, `useCallback`, `useReducer`.
 - `useStored(key, inicial)`: como `useState`, pero el valor se guarda en el teléfono.
-- `storage.get(key, porDefecto)`, `storage.set(key, valor)`, `storage.remove(key)`, `storage.keys()`, `storage.clear()`. Los valores deben poder pasarse a JSON.
+- `storage.get(key, porDefecto)`, `storage.set(key, valor)`, `storage.remove(key)`, `storage.keys()`, `storage.clear()`. Los valores deben poder pasarse a JSON. Cada clave se guarda por separado, así que cambiar una no reescribe las demás.
 - `useTheme()`: `mode`, `accent`, `text`, `secondary`, `background`, `surface`, `danger` y `color(nombre)`.
+- `launch`: cómo se abrió. `launch.source` es `library`, `link` o `notification`; `launch.data` trae los parámetros del enlace o los `data` del aviso.
+- `useAppState(alCambiar)`: `active`, `inactive` o `background`; `alCambiar` se llama en cada cambio, por ejemplo para guardar al salir.
+
+### Interfaz del sistema
+
 - `haptic(tipo)`: `light`, `medium`, `heavy`, `selection`, `success`, `warning`, `error`.
 - `await alert(título, mensaje)`, `await confirm(título, mensaje, { confirm, destructive })` devuelve `true`/`false`, `await prompt(título, mensaje, inicial)` devuelve el texto o `null`.
 - `close()`: cierra la miniapp.
-- `await pickImages({ multiple, limit })` abre la galería y `await takePhoto()` la cámara. Devuelven `{ id, width, height }`: una lista en el primer caso, o `null` si se cancela en el segundo. Las fotos se copian a la carpeta de la miniapp, con un máximo de 1600 px y una miniatura de 480 px, así que siguen ahí aunque las borres de Fotos. Se muestran con `<Photo id={…} />`. Guarda el `id` (por ejemplo con `useStored`) y llama a `deleteImage(id)` cuando ya no la necesites. Al eliminar la miniapp se borran sus fotos.
-- `share(texto)`, `openURL(url)`, `clipboard.get()`, `clipboard.set(texto)`.
-- `fetch`, `setTimeout` y `setInterval`. Los temporizadores se detienen al salir de la miniapp.
+- `share(texto)`, `openURL(url)`, `openBrowser(url)` (navegador dentro de la app), `openMaps('Plaza San Martín')` o `openMaps({ latitude, longitude, title })`, `clipboard.get()`, `clipboard.set(texto)`.
+- `await authenticate(motivo)`: pide Face ID (o el código del iPhone) y devuelve `true` si pasa.
+- `speak(texto, { language, rate, pitch })` lee en voz alta (por defecto `es-ES`) y termina al acabar; `stopSpeaking()` lo corta.
+- `console.log`, `info`, `warn`, `error`: se ven en Consola, en el panel que abre agitar. Guarda los últimos 500 mensajes de la ejecución; los errores también aparecen ahí.
+
+### Fotos, video, audio y archivos
+
+Todo se copia a la carpeta de la miniapp y se identifica por un `id`. Guarda el `id` (por ejemplo con `useStored`). Al eliminar la miniapp se borra todo.
+
+- `await pickImages({ multiple, limit })` abre la galería y `await takePhoto()` la cámara. Devuelven `{ id, width, height }`: una lista en el primer caso, o `null` si se cancela en el segundo. Las fotos se guardan con un máximo de 1600 px y una miniatura de 480 px, y se muestran con `<Photo id={…} />`. `deleteImage(id)` la borra.
+- `await pickVideos({ multiple, limit })` y `await recordVideo({ maxSeconds })` devuelven `{ id, width, height, duration }` (lista o uno). Se muestran con `<Video source={id} />`.
+- `useRecorder()`: `{ recording, seconds, start(), stop() }`. `await stop()` guarda la grabación y devuelve `{ id, duration }`.
+- `usePlayer(idOUrl)`: `{ playing, position, duration, loaded, play(), pause(), toggle(), seek(segundos) }`. `await playSound(idOUrl, { volume })` suena una vez sin interfaz.
+- `await pickFiles({ types, multiple })` copia archivos desde Archivos y devuelve `{ id, name, size, type }`. `await readFile(id)` lee uno como texto. `await saveFile('datos.csv', texto)` crea uno y devuelve su `id`.
+- `await exportFile('datos.csv', texto)` abre la hoja de compartir con ese archivo, para guardarlo en Archivos o enviarlo. `await shareFile(id)` comparte una foto, video, audio o archivo guardado. `fileUri(id)` da su ruta; `deleteFile(id)` borra cualquiera.
+
+### Ubicación y sensores
+
+- `await location.get({ precise })`: `{ latitude, longitude, altitude, accuracy, speed, time }`. Pide permiso la primera vez.
+- `await location.address(punto)`: `{ text, street, number, district, city, region, country, postalCode }` o `null`. `await location.search('Larcomar')` devuelve una lista de puntos. `location.distance(a, b)` da los metros entre dos puntos.
+- `useLocation({ precise, distance })`: `{ location, error }`, se actualiza al moverte `distance` metros (10 por defecto).
+- `useHeading()`: rumbo en grados desde el norte. `useAccelerometer(ms)` y `useGyroscope(ms)`: `{ x, y, z }`. `useBarometer(ms)`: `{ pressure, relativeAltitude }`. Valen `null` hasta la primera lectura.
+
+### Avisos
+
+- `await notify.schedule({ title, body, data, sound, ... })` devuelve su `id`. Cuándo: `at` (fecha), `seconds` (con `repeat: true`, cada 60 s como mínimo), `daily: { hour, minute }` o `weekly: { weekday, hour, minute }` con `weekday` de 1 (lunes) a 7 (domingo). Sin ninguno, sale al instante.
+- `await notify.list()`, `await notify.cancel(id)`, `await notify.cancelAll()`: solo ven los avisos de esta miniapp.
+- Tocar un aviso abre su miniapp desde cero, con `launch.source === 'notification'` y sus `data` en `launch.data`.
+
+### Enlaces
+
+`miniapps://abrir/Notas` abre la miniapp Notas (con o sin `.js`, sin importar mayúsculas). Lo que va tras `?` llega en `launch.data`: `miniapps://abrir/Notas?nota=3` da `{ nota: '3' }`. Sirve para Atajos, widgets de otras apps o un enlace en Notas. En Expo Go el enlace es `exp://<dirección>/--/abrir/Notas`.
+
+### Más
+
+- `fetch`, `setTimeout` y `setInterval`. Los temporizadores, sonidos y la voz se detienen al salir de la miniapp.
 
 También se pueden importar: `import { useStored, Text } from 'superapp'`, además de `react`, `@expo/ui/swift-ui` y `@expo/ui/swift-ui/modifiers`.
 
+## Respaldo
+
+El respaldo de Ajustes incluye cada miniapp con sus datos, fotos, grabaciones y archivos. Los videos no entran por su tamaño. Al restaurar, las miniapps del respaldo reemplazan a las del mismo nombre y las demás se quedan.
+
 ## Errores
 
-Un error de sintaxis se muestra en el editor con su línea al guardar; el archivo se guarda igual. Un error al ejecutar reemplaza la miniapp con el mensaje y los botones Editar y Reintentar, también si ocurre dentro de un `onPress` o un temporizador. Las comillas tipográficas, el guion largo y los puntos suspensivos que mete el teclado de iOS se corrigen al guardar si rompen el código.
+Un error de sintaxis se muestra en el editor con su línea al guardar; el archivo se guarda igual. Un error al ejecutar reemplaza la miniapp con el mensaje y los botones Editar, Reintentar, Cerrar y Consola, también si ocurre dentro de un `onPress` o un temporizador. Las comillas tipográficas, el guion largo y los puntos suspensivos que mete el teclado de iOS se corrigen al guardar si rompen el código.
 
 Un bucle infinito no se puede interrumpir y congela la app hasta cerrarla.
 

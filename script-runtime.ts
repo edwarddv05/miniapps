@@ -234,3 +234,180 @@ export default function App() {
   );
 }
 `;
+
+// Recordings, videos and files a miniapp keeps sit next to its images. The
+// id carries the file's extension, so players and the share sheet know its type.
+const MEDIA_ID = /^(aud|vid|fil)-[a-z0-9]+-[a-z0-9]+\.[a-z0-9]{1,5}$/;
+export type MediaKind = 'aud' | 'vid' | 'fil';
+
+export function newMediaId(kind: MediaKind, extension: string, now = Date.now(), random = Math.random()) {
+  const ext = extension.replace(/^\./, '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'bin';
+  return `${kind}-${now.toString(36)}-${Math.floor(random * 36 ** 6).toString(36).padStart(6, '0')}.${ext}`;
+}
+
+export function isMediaId(value: unknown): value is string {
+  return typeof value === 'string' && MEDIA_ID.test(value);
+}
+
+/** The extension of a file name or URI, without the dot; empty when there is none. */
+export function extensionOf(name: string) {
+  const match = /\.([A-Za-z0-9]{1,5})(?:[?#].*)?$/.exec(name);
+  return match ? match[1].toLowerCase() : '';
+}
+
+// Each stored value is its own entry, so changing one never rewrites the rest.
+export const SCRIPT_KV_PREFIX = '@miniapps/script-kv/';
+
+export function scriptKvPrefix(fileName: string) {
+  return `${SCRIPT_KV_PREFIX}${fileName}/`;
+}
+
+/** Log lines a miniapp writes with console.*: one string per call, objects as JSON. */
+export function formatLog(args: unknown[]) {
+  return args.map((value) => {
+    if (typeof value === 'string') return value;
+    if (value instanceof Error) return `${value.name}: ${value.message}`;
+    if (value === undefined) return 'undefined';
+    if (typeof value === 'function') return `[función ${value.name || 'anónima'}]`;
+    try {
+      const text = JSON.stringify(value, null, 2);
+      return text === undefined ? String(value) : text;
+    } catch {
+      return String(value);
+    }
+  }).join(' ');
+}
+
+export type ScriptsBackup = {
+  files: Array<{ name: string; source: string }>;
+  data: Record<string, Record<string, unknown>>;
+  media: Record<string, Record<string, string>>;
+};
+
+/** Checks the miniapps section of a backup; null when absent, throws when malformed. */
+export function parseScriptsBackup(value: unknown): ScriptsBackup | null {
+  if (value === undefined || value === null) return null;
+  const section = value as Partial<ScriptsBackup>;
+  const bad = () => new Error('Las miniapps del respaldo no son válidas.');
+  if (!Array.isArray(section.files) || typeof section.data !== 'object' || section.data === null || typeof section.media !== 'object' || section.media === null) throw bad();
+  const files = section.files.map((file) => {
+    if (typeof file?.name !== 'string' || typeof file?.source !== 'string' || !isScriptFile(file.name) || scriptFileName(file.name) !== file.name) throw bad();
+    return { name: file.name, source: file.source };
+  });
+  const names = new Set(files.map((file) => file.name));
+  const data: ScriptsBackup['data'] = {};
+  for (const [name, values] of Object.entries(section.data)) {
+    if (!names.has(name) || typeof values !== 'object' || values === null || Array.isArray(values)) throw bad();
+    data[name] = values as Record<string, unknown>;
+  }
+  const media: ScriptsBackup['media'] = {};
+  for (const [name, items] of Object.entries(section.media)) {
+    if (!names.has(name) || typeof items !== 'object' || items === null) throw bad();
+    media[name] = {};
+    for (const [file, base64] of Object.entries(items as Record<string, unknown>)) {
+      const id = file.replace(/(\.thumb)?\.jpg$/, '');
+      if ((!isImageId(id) && !isMediaId(file)) || typeof base64 !== 'string') throw bad();
+      media[name][file] = base64;
+    }
+  }
+  return { files, data, media };
+}
+
+// ─── Notifications ─────────────────────────────────────────────────────────
+
+export type NotifyOptions = {
+  title?: string;
+  body?: string;
+  at?: Date | number | string;
+  seconds?: number;
+  repeat?: boolean;
+  daily?: { hour: number; minute?: number };
+  weekly?: { weekday: number; hour: number; minute?: number };
+};
+
+export type NotifyTrigger =
+  | null
+  | { type: 'date'; date: number }
+  | { type: 'timeInterval'; seconds: number; repeats: boolean }
+  | { type: 'daily'; hour: number; minute: number }
+  | { type: 'weekly'; weekday: number; hour: number; minute: number };
+
+const whole = (value: unknown, min: number, max: number, what: string) => {
+  const number = Number(value ?? 0);
+  if (!Number.isInteger(number) || number < min || number > max) throw new Error(`${what} debe ser un entero de ${min} a ${max}.`);
+  return number;
+};
+
+/**
+ * When a notification fires: `at` a date, after `seconds`, `daily` at a time
+ * or `weekly` on a weekday (1 = lunes … 7 = domingo). Nothing means now.
+ * Weekdays are turned into iOS's own numbering, where 1 is Sunday.
+ */
+export function notificationTrigger(options: NotifyOptions, now = Date.now()): NotifyTrigger {
+  if (options.at !== undefined) {
+    const date = options.at instanceof Date ? options.at.getTime() : typeof options.at === 'number' ? options.at : Date.parse(options.at);
+    if (!Number.isFinite(date)) throw new Error('La fecha del aviso no es válida.');
+    if (date <= now) throw new Error('La fecha del aviso ya pasó.');
+    return { type: 'date', date };
+  }
+  if (options.seconds !== undefined) {
+    const seconds = Number(options.seconds);
+    const repeats = options.repeat === true;
+    if (!Number.isFinite(seconds) || seconds < (repeats ? 60 : 1)) throw new Error(repeats ? 'Un aviso que se repite necesita al menos 60 segundos.' : 'seconds debe ser 1 o más.');
+    return { type: 'timeInterval', seconds: Math.round(seconds), repeats };
+  }
+  if (options.daily) return { type: 'daily', hour: whole(options.daily.hour, 0, 23, 'hour'), minute: whole(options.daily.minute, 0, 59, 'minute') };
+  if (options.weekly) {
+    const weekday = whole(options.weekly.weekday, 1, 7, 'weekday');
+    return { type: 'weekly', weekday: (weekday % 7) + 1, hour: whole(options.weekly.hour, 0, 23, 'hour'), minute: whole(options.weekly.minute, 0, 59, 'minute') };
+  }
+  return null;
+}
+
+// ─── Links ─────────────────────────────────────────────────────────────────
+
+/**
+ * The miniapp a link opens: miniapps://abrir/Notas?nota=3, or the same path
+ * after "/--/" in an Expo Go link. Null for any other link.
+ */
+export function parseMiniappLink(url: string): { name: string; params: Record<string, string> } | null {
+  const match = /^(?:miniapps:\/\/|[a-z][a-z0-9+.-]*:\/\/[^/]*\/--\/)abrir\/([^?#]+)(?:\?([^#]*))?/i.exec(url.trim());
+  if (!match) return null;
+  let name: string;
+  try {
+    name = decodeURIComponent(match[1].replace(/\+/g, ' ')).replace(/\/+$/, '').trim();
+  } catch {
+    return null;
+  }
+  if (!name) return null;
+  const params: Record<string, string> = {};
+  for (const pair of (match[2] ?? '').split('&')) {
+    if (!pair) continue;
+    const [key, value = ''] = pair.split('=');
+    try {
+      params[decodeURIComponent(key.replace(/\+/g, ' '))] = decodeURIComponent(value.replace(/\+/g, ' '));
+    } catch {
+      // A badly encoded parameter is skipped.
+    }
+  }
+  return { name, params };
+}
+
+/** The file a name refers to: the exact file name, or the name without .js/.jsx, ignoring case. */
+export function findScriptFile(name: string, files: string[]) {
+  const wanted = name.trim().toLowerCase();
+  return files.find((file) => file.toLowerCase() === wanted) ?? files.find((file) => baseName(file).toLowerCase() === wanted) ?? null;
+}
+
+// ─── Places ────────────────────────────────────────────────────────────────
+
+export type Point = { latitude: number; longitude: number };
+
+/** Distance in metres between two points, along the Earth's surface. */
+export function distanceMeters(a: Point, b: Point) {
+  const rad = Math.PI / 180;
+  const dLat = (b.latitude - a.latitude) * rad;
+  const dLon = (b.longitude - a.longitude) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.latitude * rad) * Math.cos(b.latitude * rad) * Math.sin(dLon / 2) ** 2;
+  return 2 * 6371000 * Math.asin(Math.min(1, Math.sqrt(h)));
+}

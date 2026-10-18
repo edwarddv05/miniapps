@@ -32,13 +32,13 @@ test('a backup holds every section with its format and version', async () => {
   assert.equal(made.version, 1);
   assert.equal(made.createdAt, '2026-10-03T12:00:00.000Z');
   assert.equal(made.data.fare, 'student');
-  assert.deepEqual(backup.summarize(made.data), { classes: 1, anime: 1, cards: 1, purchases: 1, trips: 1 });
+  assert.deepEqual(backup.summarize(made.data), { classes: 1, anime: 1, cards: 1, purchases: 1, trips: 1, miniapps: 0 });
 });
 
 test('an empty phone makes a valid, empty backup', async () => {
   const { backup } = setup();
   const made = await backup.buildBackup();
-  assert.deepEqual(backup.summarize(made.data), { classes: 0, anime: 0, cards: 0, purchases: 0, trips: 0 });
+  assert.deepEqual(backup.summarize(made.data), { classes: 0, anime: 0, cards: 0, purchases: 0, trips: 0, miniapps: 0 });
   assert.deepEqual(backup.summarize(backup.parseBackup(JSON.stringify(made)).data), backup.summarize(made.data));
 });
 

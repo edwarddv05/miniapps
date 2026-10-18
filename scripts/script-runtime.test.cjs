@@ -100,3 +100,66 @@ test('stored images keep their shape within 1600 px, thumbnails within 480 px', 
   assert.deepEqual(runtime.imageSizes(4032, 3024), { full: { width: 1600, height: 1200 }, thumb: { width: 480, height: 360 } });
   assert.deepEqual(runtime.imageSizes(800, 1200), { full: { width: 800, height: 1200 }, thumb: { width: 320, height: 480 } });
 });
+
+test('notification triggers cover a date, a delay, daily and weekly times', () => {
+  const now = Date.parse('2026-10-18T10:00:00Z');
+  assert.equal(runtime.notificationTrigger({}, now), null);
+  assert.deepEqual(runtime.notificationTrigger({ at: '2026-10-18T11:00:00Z' }, now), { type: 'date', date: now + 3600000 });
+  assert.throws(() => runtime.notificationTrigger({ at: now - 1 }, now), /ya pasó/);
+  assert.throws(() => runtime.notificationTrigger({ at: 'mañana' }, now), /no es válida/);
+  assert.deepEqual(runtime.notificationTrigger({ seconds: 90.4 }, now), { type: 'timeInterval', seconds: 90, repeats: false });
+  assert.throws(() => runtime.notificationTrigger({ seconds: 30, repeat: true }, now), /60 segundos/);
+  assert.deepEqual(runtime.notificationTrigger({ daily: { hour: 7 } }, now), { type: 'daily', hour: 7, minute: 0 });
+  assert.throws(() => runtime.notificationTrigger({ daily: { hour: 24 } }, now), /hour/);
+  // lunes = 1 is iOS's 2; domingo = 7 is iOS's 1.
+  assert.equal(runtime.notificationTrigger({ weekly: { weekday: 1, hour: 8 } }, now).weekday, 2);
+  assert.equal(runtime.notificationTrigger({ weekly: { weekday: 7, hour: 8 } }, now).weekday, 1);
+});
+
+test('miniapp links name a file and carry their query', () => {
+  assert.deepEqual(runtime.parseMiniappLink('miniapps://abrir/Notas'), { name: 'Notas', params: {} });
+  assert.deepEqual(runtime.parseMiniappLink('miniapps://abrir/Mis%20notas?nota=3&modo=ver+todo'), { name: 'Mis notas', params: { nota: '3', modo: 'ver todo' } });
+  assert.deepEqual(runtime.parseMiniappLink('exp://192.168.1.4:8081/--/abrir/Notas.jsx/'), { name: 'Notas.jsx', params: {} });
+  assert.equal(runtime.parseMiniappLink('miniapps://otra/Notas'), null);
+  assert.equal(runtime.parseMiniappLink('https://example.com/abrir/Notas'), null);
+  const files = ['Notas.jsx', 'notas.js', 'Gastos.js'];
+  assert.equal(runtime.findScriptFile('notas.js', files), 'notas.js');
+  assert.equal(runtime.findScriptFile('GASTOS', files), 'Gastos.js');
+  assert.equal(runtime.findScriptFile('Otra', files), null);
+});
+
+test('media ids keep their extension and are told apart from other strings', () => {
+  const id = runtime.newMediaId('aud', '.M4A', 1000, 0.5);
+  assert.match(id, /^aud-rs-[a-z0-9]{6}\.m4a$/);
+  assert.ok(runtime.isMediaId(id));
+  assert.ok(!runtime.isMediaId('aud-x-y.toolong'));
+  assert.ok(!runtime.isMediaId('../secret.txt'));
+  assert.equal(runtime.newMediaId('fil', '', 1, 0).endsWith('.bin'), true);
+  assert.equal(runtime.extensionOf('file:///a/b/Clip.MOV?x=1'), 'mov');
+  assert.equal(runtime.extensionOf('sin-extension'), '');
+});
+
+test('log lines join their arguments and show objects as JSON', () => {
+  assert.equal(runtime.formatLog(['total', 3, { a: 1 }]), 'total 3 {\n  "a": 1\n}');
+  assert.equal(runtime.formatLog([new TypeError('mal'), undefined]), 'TypeError: mal undefined');
+  const loop = {};
+  loop.self = loop;
+  assert.equal(runtime.formatLog([loop]), '[object Object]');
+});
+
+test('the miniapps section of a backup is checked before it is used', () => {
+  assert.equal(runtime.parseScriptsBackup(undefined), null);
+  const good = { files: [{ name: 'Notas.jsx', source: 'x' }], data: { 'Notas.jsx': { notes: [] } }, media: { 'Notas.jsx': { 'img-a-000001.jpg': 'AA==', 'img-a-000001.thumb.jpg': 'AA==', 'aud-a-000001.m4a': 'AA==' } } };
+  assert.deepEqual(runtime.parseScriptsBackup(good), good);
+  assert.throws(() => runtime.parseScriptsBackup({ ...good, files: [{ name: '../x.js', source: '' }] }), /no son válidas/);
+  assert.throws(() => runtime.parseScriptsBackup({ ...good, data: { 'Otra.js': {} } }), /no son válidas/);
+  assert.throws(() => runtime.parseScriptsBackup({ ...good, media: { 'Notas.jsx': { '../../evil': 'AA==' } } }), /no son válidas/);
+});
+
+test('distances follow the Earth surface', () => {
+  const lima = { latitude: -12.0464, longitude: -77.0428 };
+  const callao = { latitude: -12.0566, longitude: -77.1181 };
+  const meters = runtime.distanceMeters(lima, callao);
+  assert.ok(meters > 8000 && meters < 8400, String(meters));
+  assert.equal(runtime.distanceMeters(lima, lima), 0);
+});

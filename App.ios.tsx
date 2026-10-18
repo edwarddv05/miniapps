@@ -26,6 +26,10 @@ import { TRANSIT_ICON, TransitNative, TransitTodayNative } from './screens/trans
 import { CARDS_ICON, CardsNative, CardsTodayNative, useCardsLibraryDetail } from './screens/cards';
 import { AIScanReviewNative, APIKeySheetNative, ScheduleEditorNative, ScheduleNative } from './screens/schedule';
 import { ScriptEditorNative, ScriptRowsNative, ScriptRunnerNative, ScriptsMenuNative } from './screens/scripts';
+import { installNotificationHandler, listenForMiniappOpens } from './screens/script-device';
+import type { ScriptLaunch } from './screens/script-context';
+import { currentScripts, refreshScripts } from './script-files';
+import { findScriptFile } from './script-runtime';
 
 function HomeNative({ entries, tokens, loading, error, onOpenSchedule, onOpenAnime, onOpenTrip, onOpenCard, onRetry }: { entries: ScheduleEntry[]; tokens: ThemeTokens; loading: boolean; error: string | null; onOpenSchedule: () => void; onOpenAnime: (id: number) => void; onOpenTrip: (trip: SavedTrip) => void; onOpenCard: (cardId: string) => void; onRetry: () => void }) {
   const now = useCurrentTime();
@@ -172,7 +176,7 @@ function MiniappsTabNative({ entries, tokens, loading, error, destination, sched
   );
 }
 
-// Copy of the schedule, anime list, cards and saved trips, and restoring it.
+// Copy of the schedule, anime list, cards, saved trips and miniapps, and restoring it.
 function BackupRowsNative({ tokens, onRestored }: { tokens: ThemeTokens; onRestored: () => void }) {
   const [busy, setBusy] = useState<'export' | 'restore' | null>(null);
 
@@ -517,12 +521,27 @@ export default function App() {
   const [scriptName, setScriptName] = useState<string | null>(null);
   const [scriptRunning, setScriptRunning] = useState(false);
   const [scriptEdit, setScriptEdit] = useState<{ name: string | null; rerun: boolean; nonce: number } | null>(null);
-  const openScript = (name: string) => {
+  const [scriptLaunch, setScriptLaunch] = useState<{ launch: ScriptLaunch; key: number }>({ launch: { source: 'library', data: null }, key: 0 });
+  const openScript = (name: string, launch: ScriptLaunch = { source: 'library', data: null }) => {
     setScriptName(name);
+    setScriptLaunch({ launch, key: Date.now() });
     setScriptRunning(true);
     setScreen('miniapps');
     setDestination('library');
   };
+  // Links and tapped notifications name a miniapp; it runs afresh with what they carry.
+  const openScriptRef = useRef(openScript);
+  openScriptRef.current = openScript;
+  useEffect(() => {
+    installNotificationHandler();
+    return listenForMiniappOpens((name, launch) => {
+      void refreshScripts().then(() => {
+        const file = findScriptFile(name, currentScripts().map((item) => item.name));
+        if (file) openScriptRef.current(file, launch);
+        else Alert.alert('Miniapp no encontrada', `No hay ninguna miniapp llamada "${name}".`);
+      });
+    });
+  }, []);
   const editScript = (name: string | null, rerun = false) => {
     setScriptRunning(false);
     setScriptEdit({ name, rerun, nonce: Date.now() });
@@ -688,7 +707,7 @@ export default function App() {
         </BottomSheet>
       </ZStack>
     </Host>
-    <ScriptRunnerNative name={scriptName} visible={scriptRunning} shake={scriptShake} tokens={tokens} onClose={() => setScriptRunning(false)} onEdit={(name) => editScript(name, true)} />
+    <ScriptRunnerNative name={scriptName} visible={scriptRunning} shake={scriptShake} tokens={tokens} launch={scriptLaunch.launch} runKey={scriptLaunch.key} onClose={() => setScriptRunning(false)} onEdit={(name) => editScript(name, true)} />
     </>
   );
 }

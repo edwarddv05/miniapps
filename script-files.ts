@@ -4,7 +4,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as Sharing from 'expo-sharing';
 import { useSyncExternalStore } from 'react';
-import { imageSizes, isImageId, isScriptFile, newImageId, scriptDataKey, uniqueScriptName } from './script-runtime';
+import { extensionOf, imageSizes, isImageId, isMediaId, isScriptFile, newImageId, newMediaId, parseScriptData, scriptDataKey, scriptKvPrefix, uniqueScriptName, type MediaKind, type ScriptsBackup } from './script-runtime';
 
 // The .js miniapps live as plain files in the app's documents folder, under
 // "miniapps". Files come in from the Files app and go out through the share sheet.
@@ -15,8 +15,8 @@ type ScriptsState = { ready: boolean; failed: boolean; files: ScriptFile[] };
 const MAX_BYTES = 512 * 1024;
 const dir = () => `${FileSystem.documentDirectory}miniapps/`;
 const uri = (name: string) => `${dir()}${encodeURIComponent(name)}`;
-// Each miniapp's images live in a hidden folder named after its file.
-const imagesDir = (name: string) => `${dir()}.images/${encodeURIComponent(name)}/`;
+// Each miniapp's images, recordings, videos and files live in a hidden folder named after its file.
+const mediaDir = (name: string) => `${dir()}.images/${encodeURIComponent(name)}/`;
 
 let state: ScriptsState = { ready: false, failed: false, files: [] };
 const listeners = new Set<() => void>();
@@ -45,6 +45,9 @@ export async function refreshScripts() {
   }
 }
 
+/** The files as last read, for code outside React. */
+export const currentScripts = () => state.files;
+
 export function useScripts() {
   return useSyncExternalStore((listener) => {
     listeners.add(listener);
@@ -62,28 +65,77 @@ export async function writeScript(name: string, source: string) {
   await refreshScripts();
 }
 
-/** Renames a file and carries its stored values along. Fails if the new name is taken. */
+// ─── Stored values ─────────────────────────────────────────────────────────
+
+async function valueKeys(name: string) {
+  const prefix = scriptKvPrefix(name);
+  return (await AsyncStorage.getAllKeys()).filter((key) => key.startsWith(prefix));
+}
+
+/**
+ * A miniapp's stored values. Values saved by earlier versions as one JSON
+ * object are moved to one entry each the first time they are read.
+ */
+export async function loadScriptData(name: string): Promise<Record<string, unknown>> {
+  const prefix = scriptKvPrefix(name);
+  const keys = await valueKeys(name);
+  const data: Record<string, unknown> = {};
+  for (const [key, raw] of keys.length ? await AsyncStorage.multiGet(keys) : []) {
+    if (raw === null) continue;
+    try {
+      data[key.slice(prefix.length)] = JSON.parse(raw);
+    } catch {
+      // An unreadable value is left out instead of breaking the miniapp.
+    }
+  }
+  const legacy = await AsyncStorage.getItem(scriptDataKey(name));
+  if (legacy !== null) {
+    const missing = Object.entries(parseScriptData(legacy)).filter(([key]) => !(key in data));
+    if (missing.length) await AsyncStorage.multiSet(missing.map(([key, value]): [string, string] => [`${prefix}${key}`, JSON.stringify(value)]));
+    for (const [key, value] of missing) data[key] = value;
+    await AsyncStorage.removeItem(scriptDataKey(name));
+  }
+  return data;
+}
+
+/** Writes only the values that changed; `undefined` removes one. */
+export async function saveScriptValues(name: string, changes: Array<[string, unknown]>) {
+  const prefix = scriptKvPrefix(name);
+  const set = changes.filter(([, value]) => value !== undefined).map(([key, value]): [string, string] => [`${prefix}${key}`, JSON.stringify(value)]);
+  const remove = changes.filter(([, value]) => value === undefined).map(([key]) => `${prefix}${key}`);
+  if (set.length) await AsyncStorage.multiSet(set);
+  if (remove.length) await AsyncStorage.multiRemove(remove);
+}
+
+async function moveValues(from: string, to: string) {
+  const data = await loadScriptData(from);
+  await saveScriptValues(to, Object.entries(data));
+  const old = await valueKeys(from);
+  if (old.length) await AsyncStorage.multiRemove(old);
+}
+
+// ─── Files ─────────────────────────────────────────────────────────────────
+
+/** Renames a file and carries its stored values and media along. Fails if the new name is taken. */
 export async function renameScript(from: string, to: string) {
   if (from === to) return;
   const target = await FileSystem.getInfoAsync(uri(to));
   // The file system ignores case, so a case-only rename is the same file.
   if (target.exists && from.toLowerCase() !== to.toLowerCase()) throw new Error(`Ya existe "${to}".`);
   await FileSystem.moveAsync({ from: uri(from), to: uri(to) });
-  if ((await FileSystem.getInfoAsync(imagesDir(from))).exists) {
+  if ((await FileSystem.getInfoAsync(mediaDir(from))).exists) {
     await FileSystem.makeDirectoryAsync(`${dir()}.images/`, { intermediates: true });
-    await FileSystem.moveAsync({ from: imagesDir(from), to: imagesDir(to) });
+    await FileSystem.moveAsync({ from: mediaDir(from), to: mediaDir(to) });
   }
-  const data = await AsyncStorage.getItem(scriptDataKey(from));
-  if (data !== null) {
-    await AsyncStorage.setItem(scriptDataKey(to), data);
-    await AsyncStorage.removeItem(scriptDataKey(from));
-  }
+  await moveValues(from, to);
   await refreshScripts();
 }
 
 export async function deleteScript(name: string) {
   await FileSystem.deleteAsync(uri(name), { idempotent: true });
-  await FileSystem.deleteAsync(imagesDir(name), { idempotent: true });
+  await FileSystem.deleteAsync(mediaDir(name), { idempotent: true });
+  const keys = await valueKeys(name);
+  if (keys.length) await AsyncStorage.multiRemove(keys);
   await AsyncStorage.removeItem(scriptDataKey(name));
   await refreshScripts();
 }
@@ -112,26 +164,25 @@ export async function shareScript(name: string) {
   await Sharing.shareAsync(uri(name), { mimeType: 'text/javascript', UTI: 'com.netscape.javascript-source', dialogTitle: name });
 }
 
-export async function loadScriptData(name: string) {
-  return AsyncStorage.getItem(scriptDataKey(name));
-}
-
-export async function saveScriptData(name: string, data: Record<string, unknown>) {
-  await AsyncStorage.setItem(scriptDataKey(name), JSON.stringify(data));
-}
+// ─── Media ─────────────────────────────────────────────────────────────────
 
 export type ScriptImage = { id: string; width: number; height: number };
 
 /** Where a stored image is read from; `thumb` is the small copy for lists. */
 export function scriptImageUri(name: string, id: string, thumb = false) {
-  return isImageId(id) ? `${imagesDir(name)}${id}${thumb ? '.thumb' : ''}.jpg` : null;
+  return isImageId(id) ? `${mediaDir(name)}${id}${thumb ? '.thumb' : ''}.jpg` : null;
+}
+
+/** Where a stored recording, video or file is read from. */
+export function scriptMediaUri(name: string, id: string) {
+  return isMediaId(id) ? `${mediaDir(name)}${id}` : isImageId(id) ? scriptImageUri(name, id) : null;
 }
 
 /** Keeps a picked or captured photo for a miniapp: a copy up to 1600 px and a 480 px thumbnail, both JPEG. */
 export async function saveScriptImage(name: string, source: { uri: string; width: number; height: number }): Promise<ScriptImage> {
   const id = newImageId();
   const sizes = imageSizes(source.width, source.height);
-  await FileSystem.makeDirectoryAsync(imagesDir(name), { intermediates: true });
+  await FileSystem.makeDirectoryAsync(mediaDir(name), { intermediates: true });
   const full = await ImageManipulator.manipulateAsync(source.uri, [{ resize: sizes.full }], { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG });
   const thumb = await ImageManipulator.manipulateAsync(full.uri, [{ resize: sizes.thumb }], { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG });
   await FileSystem.moveAsync({ from: full.uri, to: scriptImageUri(name, id)! });
@@ -139,8 +190,84 @@ export async function saveScriptImage(name: string, source: { uri: string; width
   return { id, width: full.width, height: full.height };
 }
 
-export async function deleteScriptImage(name: string, id: string) {
-  if (!isImageId(id)) return;
-  await FileSystem.deleteAsync(scriptImageUri(name, id)!, { idempotent: true });
-  await FileSystem.deleteAsync(scriptImageUri(name, id, true)!, { idempotent: true });
+/** Copies (or moves, for a temporary recording) a file into the miniapp's folder and returns its id. */
+export async function saveScriptMedia(name: string, source: string, kind: MediaKind, extension: string, move = false) {
+  const id = newMediaId(kind, extension);
+  await FileSystem.makeDirectoryAsync(mediaDir(name), { intermediates: true });
+  if (move) await FileSystem.moveAsync({ from: source, to: scriptMediaUri(name, id)! });
+  else await FileSystem.copyAsync({ from: source, to: scriptMediaUri(name, id)! });
+  return id;
+}
+
+export async function deleteScriptMedia(name: string, id: string) {
+  if (isImageId(id)) {
+    await FileSystem.deleteAsync(scriptImageUri(name, id)!, { idempotent: true });
+    await FileSystem.deleteAsync(scriptImageUri(name, id, true)!, { idempotent: true });
+  } else if (isMediaId(id)) {
+    await FileSystem.deleteAsync(scriptMediaUri(name, id)!, { idempotent: true });
+  }
+}
+
+export async function readScriptMediaText(name: string, id: string) {
+  const path = scriptMediaUri(name, id);
+  if (!path) throw new Error('Archivo no válido.');
+  return FileSystem.readAsStringAsync(path);
+}
+
+/** Writes text to a temporary file with the given name, for the share sheet. */
+export async function temporaryTextFile(fileName: string, text: string) {
+  const safe = fileName.replace(/[\\/:*?"<>|]/g, '').trim() || 'archivo.txt';
+  const path = `${FileSystem.cacheDirectory}${encodeURIComponent(safe)}`;
+  await FileSystem.writeAsStringAsync(path, text);
+  return path;
+}
+
+export async function shareFile(path: string, mimeType?: string) {
+  await Sharing.shareAsync(path, mimeType ? { mimeType } : undefined);
+}
+
+export { extensionOf };
+
+// ─── Backup ────────────────────────────────────────────────────────────────
+
+/**
+ * The miniapps for the app's backup: every file, its stored values, and its
+ * images and recordings as base64. Videos are left out; they are too large
+ * for a backup file.
+ */
+export async function collectScriptsBackup(): Promise<ScriptsBackup> {
+  const backup: ScriptsBackup = { files: [], data: {}, media: {} };
+  if (!(await FileSystem.getInfoAsync(dir())).exists) return backup;
+  const names = (await FileSystem.readDirectoryAsync(dir())).filter(isScriptFile);
+  for (const name of names) {
+    backup.files.push({ name, source: await readScript(name) });
+    const data = await loadScriptData(name);
+    if (Object.keys(data).length) backup.data[name] = data;
+    if (!(await FileSystem.getInfoAsync(mediaDir(name))).exists) continue;
+    const media: Record<string, string> = {};
+    for (const file of await FileSystem.readDirectoryAsync(mediaDir(name))) {
+      const keep = isImageId(file.replace(/(\.thumb)?\.jpg$/, '')) || (isMediaId(file) && !file.startsWith('vid-'));
+      if (keep) media[file] = await FileSystem.readAsStringAsync(`${mediaDir(name)}${file}`, { encoding: FileSystem.EncodingType.Base64 });
+    }
+    if (Object.keys(media).length) backup.media[name] = media;
+  }
+  return backup;
+}
+
+/** Puts back the miniapps of a backup. Files with the same name are replaced; other miniapps stay. */
+export async function restoreScriptsBackup(backup: ScriptsBackup) {
+  await ensureDir();
+  for (const file of backup.files) {
+    await FileSystem.writeAsStringAsync(uri(file.name), file.source);
+    const old = await valueKeys(file.name);
+    if (old.length) await AsyncStorage.multiRemove(old);
+    await saveScriptValues(file.name, Object.entries(backup.data[file.name] ?? {}));
+    const media = backup.media[file.name];
+    if (!media) continue;
+    await FileSystem.makeDirectoryAsync(mediaDir(file.name), { intermediates: true });
+    for (const [item, base64] of Object.entries(media)) {
+      await FileSystem.writeAsStringAsync(`${mediaDir(file.name)}${item}`, base64, { encoding: FileSystem.EncodingType.Base64 });
+    }
+  }
+  await refreshScripts();
 }
