@@ -25,7 +25,7 @@ import { AnimeNative, AnimeTodayNative } from './screens/anime';
 import { TRANSIT_ICON, TransitNative, TransitTodayNative } from './screens/transit';
 import { CARDS_ICON, CardsNative, CardsTodayNative, useCardsLibraryDetail } from './screens/cards';
 import { AIScanReviewNative, APIKeySheetNative, ScheduleEditorNative, ScheduleNative } from './screens/schedule';
-import { ScriptEditorNative, ScriptNative, ScriptRowsNative, ScriptsMenuNative } from './screens/scripts';
+import { ScriptEditorNative, ScriptRowsNative, ScriptRunnerNative, ScriptsMenuNative } from './screens/scripts';
 
 function HomeNative({ entries, tokens, loading, error, onOpenSchedule, onOpenAnime, onOpenTrip, onOpenCard, onRetry }: { entries: ScheduleEntry[]; tokens: ThemeTokens; loading: boolean; error: string | null; onOpenSchedule: () => void; onOpenAnime: (id: number) => void; onOpenTrip: (trip: SavedTrip) => void; onOpenCard: (cardId: string) => void; onRetry: () => void }) {
   const now = useCurrentTime();
@@ -164,10 +164,10 @@ function HomeTabNative({ entries, tokens, loading, error, onOpenSchedule, onOpen
   );
 }
 
-function MiniappsTabNative({ entries, tokens, loading, error, destination, schedule, downloader, anime, transit, cards, script, scriptEditor, onOpenSchedule, onOpenDownloader, onOpenAnime, onOpenTransit, onOpenCards, onClearSchedule, onOpenScript, onEditScript }: { entries: ScheduleEntry[]; tokens: ThemeTokens; loading: boolean; error: string | null; destination: MiniappDestination; schedule: ReactNode; downloader: ReactNode; anime: ReactNode; transit: ReactNode; cards: ReactNode; script: ReactNode; scriptEditor: ReactNode; onOpenSchedule: () => void; onOpenDownloader: () => void; onOpenAnime: () => void; onOpenTransit: () => void; onOpenCards: () => void; onClearSchedule: () => void } & ScriptActions) {
+function MiniappsTabNative({ entries, tokens, loading, error, destination, schedule, downloader, anime, transit, cards, scriptEditor, onOpenSchedule, onOpenDownloader, onOpenAnime, onOpenTransit, onOpenCards, onClearSchedule, onOpenScript, onEditScript }: { entries: ScheduleEntry[]; tokens: ThemeTokens; loading: boolean; error: string | null; destination: MiniappDestination; schedule: ReactNode; downloader: ReactNode; anime: ReactNode; transit: ReactNode; cards: ReactNode; scriptEditor: ReactNode; onOpenSchedule: () => void; onOpenDownloader: () => void; onOpenAnime: () => void; onOpenTransit: () => void; onOpenCards: () => void; onClearSchedule: () => void } & ScriptActions) {
   return (
     <VStack modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity })]}>
-      {destination === 'schedule' ? schedule : destination === 'downloader' ? downloader : destination === 'anime' ? anime : destination === 'transit' ? transit : destination === 'cards' ? cards : destination === 'script' && script ? script : destination === 'script-editor' ? scriptEditor : <MiniappsNative entries={entries} tokens={tokens} loading={loading} error={error} onOpenSchedule={onOpenSchedule} onOpenDownloader={onOpenDownloader} onOpenAnime={onOpenAnime} onOpenTransit={onOpenTransit} onOpenCards={onOpenCards} onClearSchedule={onClearSchedule} onOpenScript={onOpenScript} onEditScript={onEditScript} />}
+      {destination === 'schedule' ? schedule : destination === 'downloader' ? downloader : destination === 'anime' ? anime : destination === 'transit' ? transit : destination === 'cards' ? cards : destination === 'script-editor' && scriptEditor ? scriptEditor : <MiniappsNative entries={entries} tokens={tokens} loading={loading} error={error} onOpenSchedule={onOpenSchedule} onOpenDownloader={onOpenDownloader} onOpenAnime={onOpenAnime} onOpenTransit={onOpenTransit} onOpenCards={onOpenCards} onClearSchedule={onClearSchedule} onOpenScript={onOpenScript} onEditScript={onEditScript} />}
     </VStack>
   );
 }
@@ -506,17 +506,20 @@ export default function App() {
     openAnime();
   };
 
-  // Miniapps from .js files: the one running, and the file open in the editor
-  // with the screen to go back to.
+  // Miniapps from .js files: the one running full screen over the app, and the
+  // file open in the editor (Biblioteca's page) with whether to run it again on close.
   const [scriptName, setScriptName] = useState<string | null>(null);
-  const [scriptEdit, setScriptEdit] = useState<{ name: string | null; from: MiniappDestination; nonce: number } | null>(null);
+  const [scriptRunning, setScriptRunning] = useState(false);
+  const [scriptEdit, setScriptEdit] = useState<{ name: string | null; rerun: boolean; nonce: number } | null>(null);
   const openScript = (name: string) => {
     setScriptName(name);
+    setScriptRunning(true);
     setScreen('miniapps');
-    setDestination('script');
+    setDestination('library');
   };
-  const editScript = (name: string | null, from: MiniappDestination = 'library') => {
-    setScriptEdit({ name, from, nonce: Date.now() });
+  const editScript = (name: string | null, rerun = false) => {
+    setScriptRunning(false);
+    setScriptEdit({ name, rerun, nonce: Date.now() });
     setScreen('miniapps');
     setDestination('script-editor');
   };
@@ -619,12 +622,14 @@ export default function App() {
   const anime = <AnimeNative tokens={tokens} apiKey={apiKey} link={animeLink} onBack={() => setDestination('library')} />;
   const transit = <TransitNative tokens={tokens} link={transitLink} onBack={() => setDestination('library')} />;
   const cards = <CardsNative tokens={tokens} link={cardsLink} onBack={() => setDestination('library')} />;
-  const script = scriptName ? <ScriptNative key={scriptName} name={scriptName} tokens={tokens} onBack={() => setDestination('library')} onEdit={() => editScript(scriptName, 'script')} /> : null;
-  const scriptEditor = scriptEdit ? <ScriptEditorNative key={scriptEdit.nonce} name={scriptEdit.name} tokens={tokens} onClose={() => setDestination(scriptEdit.from === 'script' && scriptName ? 'script' : 'library')} onSaved={openScript} /> : null;
+  const scriptEditor = scriptEdit ? <ScriptEditorNative key={scriptEdit.nonce} name={scriptEdit.name} tokens={tokens} onClose={() => {
+    setDestination('library');
+    if (scriptEdit.rerun && scriptEdit.name) openScript(scriptEdit.name);
+  }} onSaved={openScript} /> : null;
   const body = (
     <TabView selection={screen} onSelectionChange={(value) => setScreen(value as Screen)} modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity }), tint(tokens.blue)]}>
       <TabView.Tab value="home" label="Inicio" systemImage="house.fill"><HomeTabNative entries={entries} tokens={tokens} loading={loading} error={storageError} onOpenSchedule={() => openSchedule(currentDayIndex())} onOpenAnime={openAnimeDetail} onOpenTrip={openTransitTrip} onOpenCard={openCard} onRetry={loadData} /></TabView.Tab>
-      <TabView.Tab value="miniapps" label="Miniapps" systemImage="square.grid.2x2.fill"><MiniappsTabNative entries={entries} tokens={tokens} loading={loading} error={storageError} destination={destination} schedule={schedule} downloader={downloader} anime={anime} transit={transit} cards={cards} script={script} scriptEditor={scriptEditor} onOpenScript={openScript} onEditScript={(name) => editScript(name)} onOpenSchedule={() => openSchedule()} onOpenDownloader={openDownloader} onOpenAnime={openAnime} onOpenTransit={openTransit} onOpenCards={openCards} onClearSchedule={clearSchedule} /></TabView.Tab>
+      <TabView.Tab value="miniapps" label="Miniapps" systemImage="square.grid.2x2.fill"><MiniappsTabNative entries={entries} tokens={tokens} loading={loading} error={storageError} destination={destination} schedule={schedule} downloader={downloader} anime={anime} transit={transit} cards={cards} scriptEditor={scriptEditor} onOpenScript={openScript} onEditScript={(name) => editScript(name)} onOpenSchedule={() => openSchedule()} onOpenDownloader={openDownloader} onOpenAnime={openAnime} onOpenTransit={openTransit} onOpenCards={openCards} onClearSchedule={clearSchedule} /></TabView.Tab>
       <TabView.Tab value="settings" label="Ajustes" systemImage="gearshape.fill"><SettingsNative themeMode={themeMode} tokens={tokens} onThemeChange={changeTheme} apiKey={apiKey} onApiKeyChange={updateApiKey} onRestored={() => void loadData()} /></TabView.Tab>
     </TabView>
   );
@@ -672,6 +677,7 @@ export default function App() {
         </BottomSheet>
       </ZStack>
     </Host>
+    <ScriptRunnerNative name={scriptName} visible={scriptRunning} tokens={tokens} onClose={() => setScriptRunning(false)} onEdit={(name) => editScript(name, true)} />
     </>
   );
 }

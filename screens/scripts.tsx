@@ -3,13 +3,14 @@
 
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
+import { Host } from '@expo/ui';
 import * as SwiftUI from '@expo/ui/swift-ui';
 import * as Modifiers from '@expo/ui/swift-ui/modifiers';
 import { Button as NativeButton, ContentUnavailableView, ContextMenu, Divider as NativeDivider, Form, HStack as NativeHStack, Image as NativeImage, Menu, Picker as NativePicker, ProgressView, ScrollView, Section as NativeSection, Slider as NativeSlider, Spacer as NativeSpacer, Stepper as NativeStepper, Text as NativeText, TextField as NativeTextField, Toggle as NativeToggle, VStack as NativeVStack, ZStack as NativeZStack, useNativeState } from '@expo/ui/swift-ui';
 import { accessibilityLabel, autocorrectionDisabled, buttonStyle, clipShape, controlSize, disabled, font, frame, glassEffect, keyboardType, lineLimit, menuIndicator, multilineTextAlignment, onSubmit, onTapGesture, opacity, padding, pickerStyle, scrollDismissesKeyboard, tag, textFieldStyle, textInputAutocapitalization, textSelection, type ViewModifier } from '@expo/ui/swift-ui/modifiers';
 import type { SFSymbol } from 'sf-symbols-typescript';
 import React, { Component, createContext, Fragment, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
-import { Alert, Linking, Share, type ColorValue } from 'react-native';
+import { Alert, Linking, Modal, PlatformColor, Share, type ColorValue } from 'react-native';
 import { background, foregroundStyle, tint } from '../native-colors';
 import { UI } from '../ui-structure';
 import type { ScheduleColor } from '../schedule-data';
@@ -81,12 +82,21 @@ function textOf(children: ReactNode) {
 }
 
 type TextStyle = 'largeTitle' | 'title' | 'title2' | 'title3' | 'headline' | 'subheadline' | 'body' | 'callout' | 'footnote' | 'caption' | 'caption2';
-type Weight = 'regular' | 'medium' | 'semibold' | 'bold';
+type Weight = 'ultraLight' | 'thin' | 'light' | 'regular' | 'medium' | 'semibold' | 'bold' | 'heavy' | 'black';
+type Design = 'default' | 'rounded' | 'serif' | 'monospaced';
+const DISPLAY_STYLES = new Set(['largeTitle', 'title', 'title2']);
 
-function Text({ children, style, weight, color, mono, rounded, align, lines, selectable, ...rest }: ViewProps & { children?: ReactNode; style?: TextStyle; weight?: Weight; color?: string; mono?: boolean; rounded?: boolean; align?: 'leading' | 'center' | 'trailing'; lines?: number; selectable?: boolean }) {
+// One font per Text: SwiftUI keeps the innermost font, so a second one added
+// later would be ignored. Titles default to SF Pro Rounded, like the app's.
+function Text({ children, style, size, weight, design, color, mono, rounded, align, lines, selectable, ...rest }: ViewProps & { children?: ReactNode; style?: TextStyle; size?: number; weight?: Weight; design?: Design; color?: string; mono?: boolean; rounded?: boolean; align?: 'leading' | 'center' | 'trailing'; lines?: number; selectable?: boolean }) {
   const tokens = useTokens();
-  const modifiers = textModifiers(tokens, { color: resolveColor(color, tokens, 'ink'), style, weight });
-  if (mono || rounded) modifiers.push(font({ textStyle: style ?? 'body', weight: weight ?? 'regular', design: mono ? 'monospaced' : 'rounded' }));
+  const textStyle = style ?? 'body';
+  const face: Design = design ?? (mono ? 'monospaced' : rounded || (!size && DISPLAY_STYLES.has(textStyle)) ? 'rounded' : 'default');
+  const modifiers: ViewModifier[] = [
+    foregroundStyle(resolveColor(color, tokens, 'ink') ?? tokens.text),
+    size ? font({ size, weight: weight ?? 'regular', design: face }) : font({ textStyle, weight: weight ?? 'regular', design: face }),
+  ];
+  if (style && ['largeTitle', 'title', 'title2', 'title3'].includes(style)) modifiers.push(Modifiers.accessibilityAddTraits(['isHeader']));
   if (align) modifiers.push(multilineTextAlignment(align));
   if (lines) modifiers.push(lineLimit(lines));
   if (selectable) modifiers.push(textSelection(true));
@@ -270,7 +280,7 @@ const RAW_MODIFIERS = { ...Modifiers, background, foregroundStyle, tint };
 type Report = (error: unknown) => void;
 type Runtime = { scope: Record<string, unknown>; modules: Record<string, unknown>; dispose: () => void };
 
-function createRuntime(fileName: string, data: Record<string, unknown>, report: Report): Runtime {
+function createRuntime(fileName: string, data: Record<string, unknown>, report: Report, close: () => void): Runtime {
   let disposed = false;
   const timers = new Map<ReturnType<typeof globalThis.setTimeout>, 'timeout' | 'interval'>();
 
@@ -383,6 +393,9 @@ function createRuntime(fileName: string, data: Record<string, unknown>, report: 
     useState, useEffect, useMemo, useRef, useCallback, useReducer, useStored, useTheme,
     ...COMPONENTS,
     storage, haptic, alert, confirm, prompt,
+    close: () => {
+      if (!disposed) close();
+    },
     share: (text: string) => Share.share({ message: String(text) }),
     openURL: (url: string) => Linking.openURL(String(url)),
     clipboard: { get: () => Clipboard.getStringAsync(), set: (text: string) => Clipboard.setStringAsync(String(text)) },
@@ -427,8 +440,9 @@ class ScriptBoundary extends Component<{ onError: Report; children: ReactNode },
 }
 
 function FailureNative({ failure, tokens, onEdit, onRetry }: { failure: Failure; tokens: ThemeTokens; onEdit: () => void; onRetry: () => void }) {
+  // Below the close button, which floats over the top trailing corner.
   return <ScrollView modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity })]}>
-    <NativeVStack alignment="leading" spacing={12} modifiers={[frame({ width: usePageWidth(), alignment: 'leading' }), padding({ horizontal: UI.pageInset, top: 6, bottom: 32 })]}>
+    <NativeVStack alignment="leading" spacing={12} modifiers={[frame({ width: usePageWidth(), alignment: 'leading' }), padding({ horizontal: UI.pageInset, top: CIRCLE_CONTROL_SIZE + 24, bottom: 32 })]}>
       <NativeHStack alignment="center" spacing={10}>
         <SymbolImage name="exclamationmark.triangle.fill" color={tokens.danger} size={20} />
         <NativeText modifiers={textModifiers(tokens, { style: 'headline', weight: 'semibold' })}>{failure.line ? `Error en la línea ${failure.line}` : 'Error'}</NativeText>
@@ -444,12 +458,20 @@ function FailureNative({ failure, tokens, onEdit, onRetry }: { failure: Failure;
 
 type Loaded = { App: (props: Record<string, never>) => unknown; meta: ScriptMeta; runtime: Runtime };
 
-/** Runs one file. Errors replace its view until it is edited or run again. */
-export function ScriptNative({ name, tokens, onBack, onEdit }: { name: string; tokens: ThemeTokens; onBack: () => void; onEdit: () => void }) {
+/**
+ * Runs one file on the whole screen: no header, ground or tab bar from the
+ * app, only what the file draws. A close button floats in the top trailing
+ * corner (long press: Editar, Reiniciar) unless the file sets
+ * `meta.closeButton: false` and calls close() itself. Errors replace the view
+ * until the file is edited or run again.
+ */
+function ScriptNative({ name, tokens, onClose, onEdit }: { name: string; tokens: ThemeTokens; onClose: () => void; onEdit: () => void }) {
   const [run, setRun] = useState(0);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
   const report = useCallback((error: unknown) => setFailure((current) => current ?? describe(error)), []);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
 
   useEffect(() => {
     let cancelled = false;
@@ -461,7 +483,7 @@ export function ScriptNative({ name, tokens, onBack, onEdit }: { name: string; t
         const [source, raw] = await Promise.all([readScript(name), loadScriptData(name)]);
         if (cancelled) return;
         const { code } = checkScript(source);
-        runtime = createRuntime(name, parseScriptData(raw), report);
+        runtime = createRuntime(name, parseScriptData(raw), report, () => closeRef.current());
         const exports = evaluateScript(code, runtime.scope, runtime.modules);
         if (cancelled) return;
         setLoaded({ App: scriptComponent(exports), meta: readMeta(exports, name), runtime });
@@ -481,18 +503,36 @@ export function ScriptNative({ name, tokens, onBack, onEdit }: { name: string; t
   }, [failure, loaded]);
 
   const title = loaded?.meta.title ?? baseName(name);
-  const action = <NativeCircleButton tokens={tokens} label={`Editar ${title}`} systemName="pencil" onPress={onEdit} />;
-  return <PageNative title={title} tokens={tokens} onBack={onBack} action={action}>
+  const showClose = Boolean(failure) || !loaded || loaded.meta.closeButton;
+  return <NativeZStack alignment="topTrailing" modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity })]}>
     {failure ? <FailureNative failure={failure} tokens={tokens} onEdit={onEdit} onRetry={() => setRun((value) => value + 1)} />
-      : !loaded ? <NativeVStack modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity, alignment: 'top' }), padding({ top: 24 })]}><ProgressView /></NativeVStack>
+      : !loaded ? <NativeVStack modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity })]}><ProgressView /></NativeVStack>
       : <TokensContext.Provider value={tokens}>
         <ScriptBoundary key={run} onError={report}>
-          <NativeVStack spacing={0} modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity, alignment: 'top' })]}>
+          <NativeVStack spacing={0} modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity })]}>
             {React.createElement(loaded.App as React.ComponentType)}
           </NativeVStack>
         </ScriptBoundary>
       </TokensContext.Provider>}
-  </PageNative>;
+    {showClose ? <ContextMenu modifiers={[padding({ top: 4, trailing: 16 })]}>
+      <ContextMenu.Trigger>
+        <NativeCircleButton tokens={tokens} label={`Cerrar ${title}`} systemName="xmark" onPress={onClose} />
+      </ContextMenu.Trigger>
+      <ContextMenu.Items>
+        <NativeButton label="Editar" systemImage="pencil" onPress={onEdit} />
+        <NativeButton label="Reiniciar" systemImage="arrow.clockwise" onPress={() => setRun((value) => value + 1)} />
+      </ContextMenu.Items>
+    </ContextMenu> : null}
+  </NativeZStack>;
+}
+
+/** Presents a running miniapp full screen, over the tab bar, in its own SwiftUI host. */
+export function ScriptRunnerNative({ name, visible, tokens, onClose, onEdit }: { name: string | null; visible: boolean; tokens: ThemeTokens; onClose: () => void; onEdit: (name: string) => void }) {
+  return <Modal visible={visible && Boolean(name)} presentationStyle="fullScreen" animationType="slide" onRequestClose={onClose}>
+    <Host style={{ flex: 1, backgroundColor: PlatformColor('systemBackground') }} colorScheme={tokens.mode} seedColor={tokens.blue} useViewportSizeMeasurement>
+      {name ? <ScriptNative key={name} name={name} tokens={tokens} onClose={onClose} onEdit={() => onEdit(name)} /> : <NativeVStack>{null}</NativeVStack>}
+    </Host>
+  </Modal>;
 }
 
 // ---------------------------------------------------------------------------

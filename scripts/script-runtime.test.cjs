@@ -58,12 +58,13 @@ test('keyboard punctuation is fixed only when it breaks the code', () => {
 
 test('meta is read from the text without running the file', () => {
   const source = `globalThis.ran = true;\nexport const meta = { title: 'Gastos {mes}', color: "orange", icon: 'cart' };\nexport default () => null;`;
-  assert.deepEqual(runtime.staticMeta(source, 'gastos.js'), { title: 'Gastos {mes}', icon: 'cart', color: 'orange', detail: null });
+  assert.deepEqual(runtime.staticMeta(source, 'gastos.js'), { title: 'Gastos {mes}', icon: 'cart', color: 'orange', detail: null, closeButton: true });
   assert.equal(globalThis.ran, undefined);
   const withCall = `export const meta = { title: (globalThis.ran = 'x') };`;
   assert.equal(runtime.staticMeta(withCall, 'otra.jsx').title, 'otra');
   assert.equal(globalThis.ran, undefined);
   assert.equal(runtime.staticMeta('export default () => null;', 'sin-meta.js').icon, 'curlybraces');
+  assert.equal(runtime.staticMeta("export const meta = { closeButton: false };", 'propia.js').closeButton, false);
 });
 
 test('file names are cleaned and kept unique', () => {
@@ -83,7 +84,7 @@ test('stored data survives corrupt or wrong-shaped values', () => {
 });
 
 test('the new-file template compiles and runs', () => {
-  const exports = run(runtime.NEW_SCRIPT, { Page: 'Page', HStack: 'HStack', IconButton: 'IconButton' });
-  assert.equal(runtime.scriptComponent(exports)({}).type, 'Page');
+  const exports = run(runtime.NEW_SCRIPT, { HStack: 'HStack', IconButton: 'IconButton' });
+  assert.equal(runtime.scriptComponent(exports)({}).type, 'VStack');
   assert.equal(runtime.staticMeta(runtime.NEW_SCRIPT, 'Nueva.js').title, 'Nueva');
 });

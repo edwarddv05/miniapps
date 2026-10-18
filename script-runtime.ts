@@ -4,7 +4,7 @@ import { transform } from 'sucrase';
 // device (JSX and import/export become plain calls), then run with the app's
 // API as its only scope. The UI it returns is drawn by the app's SwiftUI views.
 
-export type ScriptMeta = { title: string; icon: string; color: string | null; detail: string | null };
+export type ScriptMeta = { title: string; icon: string; color: string | null; detail: string | null; closeButton: boolean };
 
 export class ScriptError extends Error {
   line: number | null;
@@ -134,7 +134,7 @@ export function scriptComponent(exports: ScriptModule) {
   return exports.default as (props: Record<string, never>) => unknown;
 }
 
-/** `export const meta = { title, icon, color, detail }`, with the file name as title when absent. */
+/** `export const meta = { title, icon, color, detail, closeButton }`, with the file name as title when absent. */
 export function readMeta(exports: ScriptModule | null, fileName: string): ScriptMeta {
   const meta = (exports?.meta && typeof exports.meta === 'object' ? exports.meta : {}) as Record<string, unknown>;
   const text = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim() : null);
@@ -143,6 +143,8 @@ export function readMeta(exports: ScriptModule | null, fileName: string): Script
     icon: text(meta.icon) ?? 'curlybraces',
     color: text(meta.color),
     detail: text(meta.detail),
+    // The app's close button floats over the miniapp unless it brings its own (it then calls close()).
+    closeButton: meta.closeButton !== false,
   };
 }
 
@@ -204,13 +206,13 @@ export default function App() {
   const [count, setCount] = useStored('count', 0);
 
   return (
-    <Page>
+    <VStack spacing={24} maxWidth={Infinity} maxHeight={Infinity}>
       <Text style="largeTitle" weight="bold" mono>{count}</Text>
       <HStack spacing={12}>
         <IconButton icon="minus" label="Restar" onPress={() => setCount(count - 1)} />
         <IconButton icon="plus" label="Sumar" prominent onPress={() => setCount(count + 1)} />
       </HStack>
-    </Page>
+    </VStack>
   );
 }
 `;

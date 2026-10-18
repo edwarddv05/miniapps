@@ -113,9 +113,9 @@ The app's colour comes from its content, not from chrome. This section supersede
 ## Miniapps in .js — October 2026
 
 - Files in the documents folder `miniapps/` (`.js`, `.jsx`) appear in Biblioteca after the built-in tools, each in its own surface with the icon, colour and detail from its `meta`, or its file name. Long press: Editar, Compartir archivo, Eliminar. Biblioteca's header holds one glass `+` menu: Nueva miniapp, Importar archivo. With no files, Biblioteca shows only the built-in tools.
-- A running miniapp uses the tool header: back, its title, an icon-only pencil glass button for the editor. Loading is a spinner under the header; an error replaces the content with "Error en la línea N", the monospaced message, Editar (prominent) and Reintentar.
+- A running miniapp owns the whole screen: it is presented full screen over the tab bar in its own SwiftUI host on the system background, with no app header, title or ground, so a file builds its interface from scratch. The only app control is a glass close button floating at the top trailing corner (long press: Editar, Reiniciar); a file that sets `meta.closeButton: false` draws its own exit and calls `close()`. Loading is a centred spinner; an error replaces the content with "Error en la línea N", the monospaced message, Editar (prominent) and Reintentar, and always keeps the close button.
 - The editor is a page, not a sheet: back is Cerrar (asks before discarding changes), the save checkmark is the accent glass circle. The file name is a title-sized field; the code is a monospaced multiline field with autocorrection and capitalisation off. A syntax error stays above the code in the danger colour with its line, and the file is saved anyway.
-- Miniapps draw with the app's own SwiftUI views and tokens (`MINIAPPS-JS.md`), so they share its type, glass controls and colours.
+- The views offered to miniapps (`MINIAPPS-JS.md`) default to the app's type, glass controls and colours; raw SwiftUI views and modifiers are available for anything else.
 
 ## Product
 
