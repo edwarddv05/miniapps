@@ -8,7 +8,9 @@ El archivo se transpila en el teléfono (JSX e `import`/`export`) y lo que devue
 
 La miniapp se abre a pantalla completa, encima de la barra de pestañas. La app no pone cabecera, título ni fondo: la pantalla es solo lo que dibuja el archivo, sobre el fondo del sistema. El contenido respeta las áreas seguras; para ocupar también la zona de la isla y el indicador de inicio usa `modifiers={[modifiers.ignoreSafeArea()]}`.
 
-Arriba a la derecha flota un botón de cierre. Si lo mantienes pulsado aparecen **Editar** y **Reiniciar**. Si la miniapp tiene su propia forma de salir, `meta.closeButton: false` quita el botón y la miniapp llama a `close()`. La pantalla de error siempre muestra el botón.
+La app no pone ningún control encima. Si agitas el teléfono se abre el panel de la app, con **Reiniciar**, **Editar** y **Cerrar miniapp**. Esto se activa o desactiva en Ajustes → Miniapps → "Agitar para abrir el menú". Si lo desactivas, solo se sale con un `close()` de la propia miniapp, o cerrando la app por completo y volviendo a abrirla. La pantalla de error siempre tiene Cerrar.
+
+En Expo Go, agitar también abre el menú de desarrollo de Expo. Para que no se abran los dos, desactiva "Shake device" en las herramientas de ese menú.
 
 ```jsx
 export const meta = { title: 'Gastos', icon: 'cart', color: 'orange', detail: 'Este mes' };
@@ -37,7 +39,7 @@ export default function App() {
 }
 ```
 
-`meta` es opcional y se lee sin ejecutar el archivo, así que solo admite valores literales. Para que el botón de cierre no aparezca, usa `closeButton: false`. `icon` es un SF Symbol. `color` es un color de clase (`red`, `orange`, `yellow`, `green`, `teal`, `blue`, `indigo`, `purple`, `pink`, `brown`) o un hex.
+`meta` es opcional y se lee sin ejecutar el archivo, así que solo admite valores literales. `icon` es un SF Symbol. `color` es un color de clase (`red`, `orange`, `yellow`, `green`, `teal`, `blue`, `indigo`, `purple`, `pink`, `brown`) o un hex.
 
 ## Componentes
 
@@ -95,7 +97,7 @@ Un bucle infinito no se puede interrumpir y congela la app hasta cerrarla.
 ## Ejemplo con su propia interfaz
 
 ```jsx
-export const meta = { title: 'Enfoque', icon: 'timer', color: 'teal', closeButton: false };
+export const meta = { title: 'Enfoque', icon: 'timer', color: 'teal' };
 
 export default function App() {
   const [left, setLeft] = useState(25 * 60);

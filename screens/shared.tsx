@@ -35,6 +35,7 @@ export type ThemeTokens = {
 
 export const THEME_KEY = '@miniapps/theme';
 export const DATA_SAVER_KEY = '@miniapps/data-saver';
+export const SCRIPT_SHAKE_KEY = '@miniapps/script-shake';
 export const SHEET_ACTION_INSET = UI.sheetActionInset;
 export const CIRCLE_CONTROL_SIZE = UI.circleControlSize;
 // Keep the label box smaller than the outer control so SwiftUI's glass style

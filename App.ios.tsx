@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import { Host } from '@expo/ui';
-import { BottomSheet, Button as NativeButton, ContextMenu, Divider, Form, HStack, Picker, ProgressView, Section, SecureField, type SecureFieldRef, Spacer, TabView, Text as NativeText, VStack, ZStack, useNativeState } from '@expo/ui/swift-ui';
+import { BottomSheet, Button as NativeButton, ContextMenu, Toggle, Divider, Form, HStack, Picker, ProgressView, Section, SecureField, type SecureFieldRef, Spacer, TabView, Text as NativeText, VStack, ZStack, useNativeState } from '@expo/ui/swift-ui';
 import { accessibilityLabel, accessibilityElement, accessibilityValue, blur, buttonStyle, clipShape, contentShape, controlSize, disabled, font, frame, ignoreSafeArea, autocorrectionDisabled, textInputAutocapitalization, lineLimit, minimumScaleFactor, monospacedDigit, onSubmit, offset, padding, pickerStyle, scrollDismissesKeyboard, shapes, submitLabel, tag } from '@expo/ui/swift-ui/modifiers';
 import type { SFSymbol } from 'sf-symbols-typescript';
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -16,7 +16,7 @@ import { getGeminiApiKey, setGeminiApiKey, pickImagesAndScan } from './ai-schedu
 import { exportBackup, pickBackup, restoreBackup, summarize, summaryText, type Backup } from './backup';
 import { type ScannedClass } from './schedule-scan';
 import { type SavedTrip } from './transit-trips';
-import { DATA_SAVER_KEY, DAYS, DataStateNative, NativeCircleButton, PageNative, ReadingCanvasNative, type ScheduleView, type Screen, MiniappRowNative, SectionHeadingNative, SymbolImage, THEME_KEY, type ThemeMode, type ThemeTokens, WeekStripNative,  capitalize, colorForKey, courseCount, currentDayIndex, durationLabel, getTokens, groupedListModifiers, minutesFromTime, momentFor, nextClassAfterToday, sortedEntries, textModifiers, timeRange, withAlpha } from './screens/shared';
+import { DATA_SAVER_KEY, DAYS, SCRIPT_SHAKE_KEY, DataStateNative, NativeCircleButton, PageNative, ReadingCanvasNative, type ScheduleView, type Screen, MiniappRowNative, SectionHeadingNative, SymbolImage, THEME_KEY, type ThemeMode, type ThemeTokens, WeekStripNative,  capitalize, colorForKey, courseCount, currentDayIndex, durationLabel, getTokens, groupedListModifiers, minutesFromTime, momentFor, nextClassAfterToday, sortedEntries, textModifiers, timeRange, withAlpha } from './screens/shared';
 import { DownloaderNative, type SharedLink } from './screens/downloader';
 import { parseAppLink } from './app-links';
 import { syncScheduleWidget } from './widget-sync';
@@ -234,7 +234,7 @@ function BackupRowsNative({ tokens, onRestored }: { tokens: ThemeTokens; onResto
   </>;
 }
 
-function SettingsNative({ themeMode, tokens, onThemeChange, apiKey, onApiKeyChange, onRestored }: { themeMode: ThemeMode; tokens: ThemeTokens; onThemeChange: (mode: ThemeMode) => void; apiKey: string; onApiKeyChange: (key: string) => void; onRestored: () => void }) {
+function SettingsNative({ themeMode, tokens, onThemeChange, apiKey, onApiKeyChange, onRestored, scriptShake, onScriptShakeChange }: { themeMode: ThemeMode; tokens: ThemeTokens; onThemeChange: (mode: ThemeMode) => void; apiKey: string; onApiKeyChange: (key: string) => void; onRestored: () => void; scriptShake: boolean; onScriptShakeChange: (value: boolean) => void }) {
   const labels: Record<ThemeMode, string> = { system: 'Sistema', light: 'Claro', dark: 'Oscuro' };
   const keyState = useNativeState('');
   const keyInput = useRef<SecureFieldRef>(null);
@@ -285,6 +285,9 @@ function SettingsNative({ themeMode, tokens, onThemeChange, apiKey, onApiKeyChan
           <Picker selection={themeMode} onSelectionChange={(value) => onThemeChange(value as ThemeMode)} modifiers={[pickerStyle('inline'), accessibilityLabel('Tema')]}>
             {(Object.keys(labels) as ThemeMode[]).map((mode) => <HStack key={mode} spacing={12} modifiers={[tag(mode), padding({ vertical: 8 })]}><SymbolImage name={mode === 'system' ? 'iphone' : mode === 'light' ? 'sun.max' : 'moon'} color={tokens.secondary} /><NativeText modifiers={textModifiers(tokens)}>{labels[mode]}</NativeText></HStack>)}
           </Picker>
+        </Section>
+        <Section title="Miniapps">
+          <Toggle label="Agitar para abrir el menú" systemImage="iphone.radiowaves.left.and.right" isOn={scriptShake} onIsOnChange={onScriptShakeChange} modifiers={[tint(tokens.blue)]} />
         </Section>
         <Section title="Datos">
           <BackupRowsNative tokens={tokens} onRestored={onRestored} />
@@ -345,6 +348,7 @@ export default function App() {
   const [apiKeySheetVisible, setApiKeySheetVisible] = useState(false);
   const [dataSaver, setDataSaver] = useState(false);
   const writePending = useRef(false);
+  const [scriptShake, setScriptShake] = useState(true);
   const ready = !loading && !storageError;
   const clock = useCurrentTime();
   const moment = momentFor(clock);
@@ -359,13 +363,15 @@ export default function App() {
     setLoading(true);
     setStorageError(null);
     try {
-      const [storedSchedule, storedTheme, storedApiKey, storedDataSaver] = await Promise.all([
+      const [storedSchedule, storedTheme, storedApiKey, storedDataSaver, storedShake] = await Promise.all([
         AsyncStorage.getItem(SCHEDULE_KEY),
         AsyncStorage.getItem(THEME_KEY),
         getGeminiApiKey(),
         AsyncStorage.getItem(DATA_SAVER_KEY),
+        AsyncStorage.getItem(SCRIPT_SHAKE_KEY),
         loadDownloaderUrl(),
       ]);
+      setScriptShake(storedShake !== 'false');
       setDataSaver(storedDataSaver === 'true');
       const parsed = parseSchedule(storedSchedule);
       const cleaned = parsed.filter((e) => !e.id.startsWith('example-'));
@@ -595,6 +601,11 @@ export default function App() {
     void AsyncStorage.setItem(DATA_SAVER_KEY, String(value)).catch(() => Alert.alert('No se pudo guardar el ajuste', 'Ahorro de datos está aplicado solo hasta cerrar la app.'));
   };
 
+  const changeScriptShake = (value: boolean) => {
+    setScriptShake(value);
+    void AsyncStorage.setItem(SCRIPT_SHAKE_KEY, String(value)).catch(() => Alert.alert('No se pudo guardar el ajuste', 'Se aplica solo hasta cerrar la app.'));
+  };
+
   const changeTheme = (mode: ThemeMode) => {
     setThemeMode(mode);
     void AsyncStorage.setItem(THEME_KEY, mode).catch(() => Alert.alert('No se pudo guardar el tema', 'El tema está aplicado. Vuelve a seleccionarlo para intentar guardarlo.'));
@@ -630,7 +641,7 @@ export default function App() {
     <TabView selection={screen} onSelectionChange={(value) => setScreen(value as Screen)} modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity }), tint(tokens.blue)]}>
       <TabView.Tab value="home" label="Inicio" systemImage="house.fill"><HomeTabNative entries={entries} tokens={tokens} loading={loading} error={storageError} onOpenSchedule={() => openSchedule(currentDayIndex())} onOpenAnime={openAnimeDetail} onOpenTrip={openTransitTrip} onOpenCard={openCard} onRetry={loadData} /></TabView.Tab>
       <TabView.Tab value="miniapps" label="Miniapps" systemImage="square.grid.2x2.fill"><MiniappsTabNative entries={entries} tokens={tokens} loading={loading} error={storageError} destination={destination} schedule={schedule} downloader={downloader} anime={anime} transit={transit} cards={cards} scriptEditor={scriptEditor} onOpenScript={openScript} onEditScript={(name) => editScript(name)} onOpenSchedule={() => openSchedule()} onOpenDownloader={openDownloader} onOpenAnime={openAnime} onOpenTransit={openTransit} onOpenCards={openCards} onClearSchedule={clearSchedule} /></TabView.Tab>
-      <TabView.Tab value="settings" label="Ajustes" systemImage="gearshape.fill"><SettingsNative themeMode={themeMode} tokens={tokens} onThemeChange={changeTheme} apiKey={apiKey} onApiKeyChange={updateApiKey} onRestored={() => void loadData()} /></TabView.Tab>
+      <TabView.Tab value="settings" label="Ajustes" systemImage="gearshape.fill"><SettingsNative themeMode={themeMode} tokens={tokens} onThemeChange={changeTheme} apiKey={apiKey} onApiKeyChange={updateApiKey} onRestored={() => void loadData()} scriptShake={scriptShake} onScriptShakeChange={changeScriptShake} /></TabView.Tab>
     </TabView>
   );
 
@@ -677,7 +688,7 @@ export default function App() {
         </BottomSheet>
       </ZStack>
     </Host>
-    <ScriptRunnerNative name={scriptName} visible={scriptRunning} tokens={tokens} onClose={() => setScriptRunning(false)} onEdit={(name) => editScript(name, true)} />
+    <ScriptRunnerNative name={scriptName} visible={scriptRunning} shake={scriptShake} tokens={tokens} onClose={() => setScriptRunning(false)} onEdit={(name) => editScript(name, true)} />
     </>
   );
 }

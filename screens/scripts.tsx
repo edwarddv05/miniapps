@@ -3,16 +3,18 @@
 
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
+import { Accelerometer } from 'expo-sensors';
 import { Host } from '@expo/ui';
 import * as SwiftUI from '@expo/ui/swift-ui';
 import * as Modifiers from '@expo/ui/swift-ui/modifiers';
-import { Button as NativeButton, ContentUnavailableView, ContextMenu, Divider as NativeDivider, Form, HStack as NativeHStack, Image as NativeImage, Menu, Picker as NativePicker, ProgressView, ScrollView, Section as NativeSection, Slider as NativeSlider, Spacer as NativeSpacer, Stepper as NativeStepper, Text as NativeText, TextField as NativeTextField, Toggle as NativeToggle, VStack as NativeVStack, ZStack as NativeZStack, useNativeState } from '@expo/ui/swift-ui';
+import { BottomSheet, Button as NativeButton, ContentUnavailableView, ContextMenu, Divider as NativeDivider, Form, HStack as NativeHStack, Image as NativeImage, Menu, Picker as NativePicker, ProgressView, ScrollView, Section as NativeSection, Slider as NativeSlider, Spacer as NativeSpacer, Stepper as NativeStepper, Text as NativeText, TextField as NativeTextField, Toggle as NativeToggle, VStack as NativeVStack, ZStack as NativeZStack, useNativeState } from '@expo/ui/swift-ui';
 import { accessibilityLabel, autocorrectionDisabled, buttonStyle, clipShape, controlSize, disabled, font, frame, glassEffect, keyboardType, lineLimit, menuIndicator, multilineTextAlignment, onSubmit, onTapGesture, opacity, padding, pickerStyle, scrollDismissesKeyboard, tag, textFieldStyle, textInputAutocapitalization, textSelection, type ViewModifier } from '@expo/ui/swift-ui/modifiers';
 import type { SFSymbol } from 'sf-symbols-typescript';
 import React, { Component, createContext, Fragment, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
 import { Alert, Linking, Modal, PlatformColor, Share, type ColorValue } from 'react-native';
 import { background, foregroundStyle, tint } from '../native-colors';
 import { UI } from '../ui-structure';
+import { createShakeDetector } from '../shake-detector';
 import type { ScheduleColor } from '../schedule-data';
 import { NEW_SCRIPT, ScriptError, baseName, checkScript, evaluateScript, parseScriptData, readMeta, scriptComponent, scriptFileName, staticMeta, type ScriptMeta } from '../script-runtime';
 import { deleteScript, importScripts, loadScriptData, readScript, refreshScripts, renameScript, saveScriptData, shareScript, useScripts, writeScript, type ScriptFile } from '../script-files';
@@ -439,10 +441,9 @@ class ScriptBoundary extends Component<{ onError: Report; children: ReactNode },
   }
 }
 
-function FailureNative({ failure, tokens, onEdit, onRetry }: { failure: Failure; tokens: ThemeTokens; onEdit: () => void; onRetry: () => void }) {
-  // Below the close button, which floats over the top trailing corner.
+function FailureNative({ failure, tokens, onEdit, onRetry, onClose }: { failure: Failure; tokens: ThemeTokens; onEdit: () => void; onRetry: () => void; onClose: () => void }) {
   return <ScrollView modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity })]}>
-    <NativeVStack alignment="leading" spacing={12} modifiers={[frame({ width: usePageWidth(), alignment: 'leading' }), padding({ horizontal: UI.pageInset, top: CIRCLE_CONTROL_SIZE + 24, bottom: 32 })]}>
+    <NativeVStack alignment="leading" spacing={12} modifiers={[frame({ width: usePageWidth(), alignment: 'leading' }), padding({ horizontal: UI.pageInset, top: 24, bottom: 32 })]}>
       <NativeHStack alignment="center" spacing={10}>
         <SymbolImage name="exclamationmark.triangle.fill" color={tokens.danger} size={20} />
         <NativeText modifiers={textModifiers(tokens, { style: 'headline', weight: 'semibold' })}>{failure.line ? `Error en la línea ${failure.line}` : 'Error'}</NativeText>
@@ -451,27 +452,83 @@ function FailureNative({ failure, tokens, onEdit, onRetry }: { failure: Failure;
       <NativeHStack alignment="center" spacing={12} modifiers={[padding({ top: 6 })]}>
         <NativeButton label="Editar" systemImage="pencil" onPress={onEdit} modifiers={[buttonStyle(nativeGlassAvailable ? 'glassProminent' : 'borderedProminent'), controlSize('large'), tint(tokens.blue)]} />
         <NativeButton label="Reintentar" systemImage="arrow.clockwise" onPress={onRetry} modifiers={[buttonStyle(nativeGlassAvailable ? 'glass' : 'bordered'), controlSize('large'), foregroundStyle(tokens.text)]} />
+        <NativeButton label="Cerrar" systemImage="xmark" onPress={onClose} modifiers={[buttonStyle(nativeGlassAvailable ? 'glass' : 'bordered'), controlSize('large'), foregroundStyle(tokens.text)]} />
       </NativeHStack>
     </NativeVStack>
   </ScrollView>;
 }
 
+/** Calls `onShake` when the phone is shaken, while `enabled`. The accelerometer runs only then. */
+function useShake(enabled: boolean, onShake: () => void) {
+  const latest = useRef(onShake);
+  latest.current = onShake;
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    let subscription: { remove: () => void } | null = null;
+    const detect = createShakeDetector();
+    Accelerometer.isAvailableAsync().then((available) => {
+      if (!available || cancelled) return;
+      Accelerometer.setUpdateInterval(50);
+      subscription = Accelerometer.addListener(({ x, y, z }) => {
+        if (detect(x, y, z, Date.now())) latest.current();
+      });
+    }, () => {});
+    return () => {
+      cancelled = true;
+      subscription?.remove();
+    };
+  }, [enabled]);
+}
+
+/** The app's own panel over a running miniapp, opened by shaking. */
+function ScriptMenuNative({ meta, name, tokens, onRestart, onEdit, onClose }: { meta: ScriptMeta | null; name: string; tokens: ThemeTokens; onRestart: () => void; onEdit: () => void; onClose: () => void }) {
+  const hue = meta?.color ? resolveColor(meta.color, tokens) : null;
+  const iconColor = typeof hue === 'string' ? hue : tokens.slate;
+  return <NativeVStack spacing={0} modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity, alignment: 'top' }), background(tokens.background)]}>
+    <NativeHStack alignment="center" spacing={14} modifiers={[frame({ maxWidth: Infinity, alignment: 'leading' }), padding({ horizontal: UI.pageInset, top: 24, bottom: 4 })]}>
+      <NativeVStack alignment="center" spacing={0} modifiers={[frame({ width: 44, height: 44 }), background(typeof hue === 'string' ? withAlpha(hue, tokens.mode === 'dark' ? 0.18 : 0.14) : tokens.slateSoft), clipShape('roundedRectangle', UI.iconRadius)]}>
+        <SymbolImage name={(meta?.icon ?? 'curlybraces') as SFSymbol} color={iconColor} size={22} />
+      </NativeVStack>
+      <NativeVStack alignment="leading" spacing={2}>
+        <NativeText modifiers={[...textModifiers(tokens, { style: 'title3', weight: 'semibold' }), lineLimit(1)]}>{meta?.title ?? baseName(name)}</NativeText>
+        <NativeText modifiers={[...textModifiers(tokens, { color: tokens.secondary, style: 'subheadline' }), lineLimit(1)]}>{name}</NativeText>
+      </NativeVStack>
+    </NativeHStack>
+    <Form modifiers={[Modifiers.listStyle('insetGrouped'), Modifiers.scrollContentBackground('hidden'), background(tokens.background), frame({ maxWidth: Infinity, maxHeight: Infinity }), Modifiers.scrollDisabled(true)]}>
+      <NativeSection>
+        <NativeButton label="Reiniciar" systemImage="arrow.clockwise" onPress={onRestart} modifiers={[tint(tokens.blue)]} />
+        <NativeButton label="Editar" systemImage="pencil" onPress={onEdit} modifiers={[tint(tokens.blue)]} />
+      </NativeSection>
+      <NativeSection>
+        <NativeButton label="Cerrar miniapp" systemImage="xmark.circle" role="destructive" onPress={onClose} />
+      </NativeSection>
+    </Form>
+  </NativeVStack>;
+}
+
 type Loaded = { App: (props: Record<string, never>) => unknown; meta: ScriptMeta; runtime: Runtime };
 
 /**
- * Runs one file on the whole screen: no header, ground or tab bar from the
- * app, only what the file draws. A close button floats in the top trailing
- * corner (long press: Editar, Reiniciar) unless the file sets
- * `meta.closeButton: false` and calls close() itself. Errors replace the view
- * until the file is edited or run again.
+ * Runs one file on the whole screen: no header, ground, tab bar or control
+ * from the app, only what the file draws. Shaking the phone (when enabled in
+ * Ajustes) opens the app's panel to restart, edit or close it; otherwise only
+ * the file's own close() or quitting the app leaves it. Errors replace the
+ * view until the file is edited or run again.
  */
-function ScriptNative({ name, tokens, onClose, onEdit }: { name: string; tokens: ThemeTokens; onClose: () => void; onEdit: () => void }) {
+function ScriptNative({ name, tokens, shake, onClose, onEdit }: { name: string; tokens: ThemeTokens; shake: boolean; onClose: () => void; onEdit: () => void }) {
   const [run, setRun] = useState(0);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const report = useCallback((error: unknown) => setFailure((current) => current ?? describe(error)), []);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+
+  useShake(shake && !menuOpen, () => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setMenuOpen(true);
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -502,10 +559,12 @@ function ScriptNative({ name, tokens, onClose, onEdit }: { name: string; tokens:
     if (failure) loaded?.runtime.dispose();
   }, [failure, loaded]);
 
-  const title = loaded?.meta.title ?? baseName(name);
-  const showClose = Boolean(failure) || !loaded || loaded.meta.closeButton;
-  return <NativeZStack alignment="topTrailing" modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity })]}>
-    {failure ? <FailureNative failure={failure} tokens={tokens} onEdit={onEdit} onRetry={() => setRun((value) => value + 1)} />
+  const restart = () => {
+    setMenuOpen(false);
+    setRun((value) => value + 1);
+  };
+  return <NativeZStack alignment="top" modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity })]}>
+    {failure ? <FailureNative failure={failure} tokens={tokens} onEdit={onEdit} onRetry={restart} onClose={onClose} />
       : !loaded ? <NativeVStack modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity })]}><ProgressView /></NativeVStack>
       : <TokensContext.Provider value={tokens}>
         <ScriptBoundary key={run} onError={report}>
@@ -514,23 +573,19 @@ function ScriptNative({ name, tokens, onClose, onEdit }: { name: string; tokens:
           </NativeVStack>
         </ScriptBoundary>
       </TokensContext.Provider>}
-    {showClose ? <ContextMenu modifiers={[padding({ top: 4, trailing: 16 })]}>
-      <ContextMenu.Trigger>
-        <NativeCircleButton tokens={tokens} label={`Cerrar ${title}`} systemName="xmark" onPress={onClose} />
-      </ContextMenu.Trigger>
-      <ContextMenu.Items>
-        <NativeButton label="Editar" systemImage="pencil" onPress={onEdit} />
-        <NativeButton label="Reiniciar" systemImage="arrow.clockwise" onPress={() => setRun((value) => value + 1)} />
-      </ContextMenu.Items>
-    </ContextMenu> : null}
+    <BottomSheet isPresented={menuOpen} onIsPresentedChange={setMenuOpen} onDismiss={() => setMenuOpen(false)}>
+      {menuOpen ? <SwiftUI.Group modifiers={[Modifiers.presentationDetents([{ height: 300 }]), Modifiers.presentationDragIndicator('visible')]}>
+        <ScriptMenuNative meta={loaded?.meta ?? null} name={name} tokens={tokens} onRestart={restart} onEdit={() => { setMenuOpen(false); onEdit(); }} onClose={() => { setMenuOpen(false); onClose(); }} />
+      </SwiftUI.Group> : null}
+    </BottomSheet>
   </NativeZStack>;
 }
 
 /** Presents a running miniapp full screen, over the tab bar, in its own SwiftUI host. */
-export function ScriptRunnerNative({ name, visible, tokens, onClose, onEdit }: { name: string | null; visible: boolean; tokens: ThemeTokens; onClose: () => void; onEdit: (name: string) => void }) {
+export function ScriptRunnerNative({ name, visible, shake, tokens, onClose, onEdit }: { name: string | null; visible: boolean; shake: boolean; tokens: ThemeTokens; onClose: () => void; onEdit: (name: string) => void }) {
   return <Modal visible={visible && Boolean(name)} presentationStyle="fullScreen" animationType="slide" onRequestClose={onClose}>
     <Host style={{ flex: 1, backgroundColor: PlatformColor('systemBackground') }} colorScheme={tokens.mode} seedColor={tokens.blue} useViewportSizeMeasurement>
-      {name ? <ScriptNative key={name} name={name} tokens={tokens} onClose={onClose} onEdit={() => onEdit(name)} /> : <NativeVStack>{null}</NativeVStack>}
+      {name ? <ScriptNative key={name} name={name} tokens={tokens} shake={shake} onClose={onClose} onEdit={() => onEdit(name)} /> : <NativeVStack>{null}</NativeVStack>}
     </Host>
   </Modal>;
 }
